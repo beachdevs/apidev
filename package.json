@@ -1,0 +1,13 @@
+{
+  "name": "apis",
+  "version": "0.0.1",
+  "description": "Quick API tool",
+  "main": "fetch.js",
+  "bin": { "api": "./api.js" },
+  "type": "module",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "author": "",
+  "license": "ISC"
+}

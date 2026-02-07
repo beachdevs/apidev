@@ -1,0 +1,6 @@
+service name url method headers body
+catfact getFact https://catfact.ninja/fact GET {} 
+httpbin get https://httpbin.org/get GET {} 
+httpbin post https://httpbin.org/post POST "{""Content-Type"": ""application/json""}" 
+openai chat https://api.openai.com/v1/chat/completions POST "{""Authorization"": ""Bearer !$API_KEY""}" "{""model"": ""!$MODEL"", ""messages"": [{""role"": ""user"", ""content"": ""!$PROMPT""}]}"
+openrouter chat https://openrouter.ai/api/v1/chat/completions POST "{""Authorization"": ""Bearer !$API_KEY""}" "{""model"": ""!$MODEL"", ""messages"": [{""role"": ""system"", ""content"": ""$SYSTEM_PROMPT""}, {""role"": ""user"", ""content"": ""!$PROMPT""}]}"
