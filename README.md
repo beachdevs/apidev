@@ -1,4 +1,4 @@
-# apis
+# apicli
 
 A quick and flexible API tool for calling services from the command line or as a Node.js module.
 
@@ -8,11 +8,11 @@ A quick and flexible API tool for calling services from the command line or as a
 git clone https://github.com/beachdevs/apicli.git && cd apicli && ./install.sh
 ```
 
-This creates `~/.apis/` for your custom APIs and adds the `api` alias to your shell. Run `git pull` to get updates.
+This creates `~/.apicli/` for your custom APIs and adds the `api` alias to your shell. Run `git pull` to get updates.
 
 ## CLI Usage
 
-Built-in APIs are loaded from the repo's `apis.txt`. Private APIs in `~/.apis/apis.txt` are merged on top — entries with the same `service.name` override the defaults. Add your own APIs there.
+Built-in APIs are loaded from the repo's `apis.txt`. Private APIs in `~/.apicli/apis.txt` are merged on top — entries with the same `service.name` override the defaults. Add your own APIs there.
 
 **Options:** `-time` — print request duration; `-debug` — print fetch request/response info (URL, headers, status) to stderr.
 
@@ -56,7 +56,7 @@ api -debug httpbin.get
 You can import the module to use the same logic in your own applications.
 
 ```javascript
-import { fetchApi, getRequest } from 'apis';
+import { fetchApi, getRequest } from 'apicli';
 
 // Simple usage
 const data = await fetchApi('httpbin', 'get', { simple: true });

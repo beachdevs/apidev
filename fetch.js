@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
 const DEFAULT_TXT_PATH = join(dirname(fileURLToPath(import.meta.url)), 'apis.txt');
-const USER_TXT_PATH = join(homedir(), '.apis', 'apis.txt');
+const USER_TXT_PATH = join(homedir(), '.apicli', 'apis.txt');
 
 const parse = (c) => {
   const lines = c.trim().split('\n');

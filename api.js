@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const defaultTxtPath = join(root, 'apis.txt');
-const userTxtPath = join(homedir(), '.apis', 'apis.txt');
+const userTxtPath = join(homedir(), '.apicli', 'apis.txt');
 
 const c = { dim: '\x1b[90m', cyan: '\x1b[36m', yellow: '\x1b[33m', green: '\x1b[32m', bold: '\x1b[1m', reset: '\x1b[0m' };
 
@@ -25,7 +25,7 @@ ${c.bold}Options${c.reset}
   ${c.cyan}-debug${c.reset}                  Print fetch request/response info (e.g. ${c.dim}api -debug httpbin.get${c.reset})
 
 ${c.bold}Note${c.reset}: Use quotes for patterns with wildcards (e.g. "h*") to prevent shell expansion.
-  Private APIs in ${c.dim}~/.apis/apis.txt${c.reset} are merged with built-ins — add your own there.
+  Private APIs in ${c.dim}~/.apicli/apis.txt${c.reset} are merged with built-ins — add your own there.
 
 ${c.bold}Example${c.reset}
   ${c.dim}api openrouter.chat API_KEY=$OPENROUTER_API_KEY MODEL=openai/gpt-4o-mini PROMPT=Hello${c.reset}

@@ -1,15 +1,15 @@
 #!/bin/bash
 
-# apis installer
+# apicli installer
 
 set -e
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-CONF_DIR="$HOME/.apis"
+CONF_DIR="$HOME/.apicli"
 BIN_NAME="api"
 CLI_PATH="$DIR/api.js"
 
-echo "🚀 Installing apis..."
+echo "🚀 Installing apicli..."
 
 # 1. Setup config directory
 echo "Creating $CONF_DIR..."
@@ -45,7 +45,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         if ! grep -q "alias $BIN_NAME=" "$SHELL_CONFIG" && ! grep -q "$DIR" "$SHELL_CONFIG"; then
             echo "Adding alias to $SHELL_CONFIG..."
             echo "" >> "$SHELL_CONFIG"
-            echo "# apis" >> "$SHELL_CONFIG"
+            echo "# apicli" >> "$SHELL_CONFIG"
             echo "alias $BIN_NAME='$CLI_PATH'" >> "$SHELL_CONFIG"
             echo "✅ Added '$BIN_NAME' alias to $SHELL_CONFIG"
             echo "👉 Run 'source $SHELL_CONFIG' or restart your terminal to use it."
