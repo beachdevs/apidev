@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { fetchApi, fetchWS, getApi, getApis, getFlow, getRequest, parseJsonResponse, runJq } from './fetch.js';
 import { ensureUserConfig, defaultUserConfigPath, defaultBundledConfigPath } from './install.js';
+import { startProxy } from './proxy.js';
 import { parseYaml } from './yaml.js';
 
 const publishedConfigUrl = 'https://raw.githubusercontent.com/beachdevs/apicat/refs/heads/master/apicat.yaml';
@@ -16,6 +17,8 @@ ${c.bold}Commands${c.reset}
   ${c.cyan}apic ls|list${c.reset} [pattern]       List APIs
   ${c.cyan}apic update${c.reset}                  Copy latest published ${c.dim}.apicat${c.reset} to ${c.dim}~/.apicat${c.reset}
   ${c.cyan}apic <service.name> --help${c.reset}   Show help for this api call
+  ${c.cyan}apic proxy -p <port>${c.reset} [${c.dim}-P <backend host:port>${c.reset}]
+                       Forward HTTP requests; -P pins the backend target
 
 ${c.bold}Options${c.reset}
   ${c.cyan}apic <service.name> --time${c.reset}          Show request duration
@@ -26,10 +29,17 @@ ${c.bold}Options${c.reset}
 export const formatResponse = (text, jq) => jq ? runJq(jq, text).trimEnd() : JSON.stringify(parseJsonResponse(text), null, 2);
 
 export const parseArgs = (raw = []) => {
+  const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P'];
   const configIdx = raw.findIndex(a => a === '-config' || a === '--config');
+  const portIdx = raw.indexOf('-p');
+  const backendIdx = raw.indexOf('-P');
   if (configIdx >= 0 && (!raw[configIdx + 1] || raw[configIdx + 1].startsWith('-'))) return { error: 'Error: -config requires a file path' };
-  const args = raw.filter((a, i) => !['-time', '--time', '-debug', '--debug', '-h', '--help'].includes(a) && !(configIdx >= 0 && (i === configIdx || i === configIdx + 1)));
-  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null };
+  if (portIdx >= 0 && (!raw[portIdx + 1] || raw[portIdx + 1].startsWith('-'))) return { error: 'Error: -p requires a port' };
+  if (backendIdx >= 0 && (!raw[backendIdx + 1] || raw[backendIdx + 1].startsWith('-'))) return { error: 'Error: -P requires a backend host:port' };
+  const skip = new Set();
+  for (const i of [configIdx, portIdx, backendIdx]) if (i >= 0) skip.add(i).add(i + 1);
+  const args = raw.filter((a, i) => !flags.includes(a) && !skip.has(i));
+  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null, port: portIdx >= 0 ? raw[portIdx + 1] : null, proxyBackend: backendIdx >= 0 ? raw[backendIdx + 1] : null };
 };
 
 export async function runCli(raw = process.argv.slice(2), io = {}) {
@@ -38,7 +48,7 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
   const bundledConfigPath = io.bundledConfigPath ?? defaultBundledConfigPath;
   const hasUser = () => fs.existsSync(userConfigPath);
   const cfg = (p) => p ?? (hasUser() ? userConfigPath : (fs.existsSync(bundledConfigPath) ? bundledConfigPath : null));
-  const { error, args, arg, pattern, time, debug, help, configPath } = parseArgs(raw);
+  const { error, args, arg, pattern, time, debug, help, configPath, port, proxyBackend } = parseArgs(raw);
   const re = (s) => new RegExp(s.replace(/\*/g, '.*'), 'i');
   const printConfig = () => { const p = cfg(configPath); if (p) err(configPath ? 'config:' : hasUser() ? 'user:   ' : 'bundled:', p); };
   const search = (rx) => { const p = cfg(configPath); if (p && fs.existsSync(p)) for (const l of fs.readFileSync(p, 'utf8').split('\n')) if (rx.test(l)) out(l); };
@@ -68,6 +78,15 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
   };
 
   if (error) return err(error), 1;
+  if (arg === 'proxy') {
+    try {
+      startProxy({ port: Number(port) || 8080, backend: proxyBackend, out });
+      return 0;
+    } catch (e) {
+      err(e.message);
+      return 1;
+    }
+  }
   await ensureUserConfig({ arg, configPath, userConfigPath, bundledConfigPath });
   if (!args.length) printConfig();
   if (!arg) return out(usage), 0;

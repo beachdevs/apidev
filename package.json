@@ -1,6 +1,6 @@
 {
   "name": "apicat",
-  "version": "0.3.20",
+  "version": "0.3.21",
   "description": "Quick and flexible API tool for Node.js CLI and JavaScript",
   "repository": {
     "type": "git",

@@ -49,6 +49,7 @@ If you want an AI to learn your API definitions, tell it:
 - One command: `apic`
 - One bundled config file: `~/.apicat`
 - HTTP and WebSocket support
+- Simple forward proxy: `apic proxy -p <port> [-P <backend host:port>]`
 - Variables with `$VAR` and required variables with `$!VAR`
 - Works as a CLI, a library, and an exported CLI module
 
@@ -81,6 +82,12 @@ apic httpbin.get --debug
 
 # refresh ~/.apicat from the published apicat.yaml
 apic update
+
+# forward HTTP requests through a local proxy
+# without -P it forwards to the host in each request
+apic proxy -p 8080
+# with -P it pins the backend: all requests go there
+apic proxy -p 8080 -P api.example.com:443
 
 # OpenAI-compatible chat
 apic openai.chat \
