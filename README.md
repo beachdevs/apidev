@@ -87,6 +87,7 @@ apic update
 # without -P it forwards to the host in each request
 apic proxy -p 8080
 # with -P it pins the backend: all requests go there
+# a bare port (e.g. -P 3000) means localhost:3000
 apic proxy -p 8080 -P api.example.com:443
 
 # OpenAI-compatible chat

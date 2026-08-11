@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { fetchApi, fetchWS, getApi, getApis, getFlow, getRequest, parseJsonResponse, runJq } from './fetch.js';
 import { ensureUserConfig, defaultUserConfigPath, defaultBundledConfigPath } from './install.js';
-import { startProxy } from './proxy.js';
+import { startProxy, checkBackend } from './proxy.js';
 import { parseYaml } from './yaml.js';
 
 const publishedConfigUrl = 'https://raw.githubusercontent.com/beachdevs/apicat/refs/heads/master/apicat.yaml';
@@ -80,6 +80,10 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
   if (error) return err(error), 1;
   if (arg === 'proxy') {
     try {
+      if (proxyBackend && !(await checkBackend(proxyBackend))) {
+        err(`Error: cannot reach proxy backend ${proxyBackend}`);
+        return 1;
+      }
       startProxy({ port: Number(port) || 8080, backend: proxyBackend, out });
       return 0;
     } catch (e) {

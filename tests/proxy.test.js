@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { startProxy } from '../src/proxy.js';
+import { startProxy, checkBackend } from '../src/proxy.js';
 
 test('proxy forwards method, headers, and body and returns backend status', async () => {
   const backend = http.createServer((req, res) => {
@@ -47,4 +47,32 @@ test('proxy returns 502 when the backend is unreachable', async () => {
   } finally {
     proxy.close();
   }
+});
+
+test('proxy startup message includes the process pid', async () => {
+  const lines = [];
+  const proxy = startProxy({ port: 0, backend: null, out: (m) => lines.push(m) });
+  await new Promise((r) => proxy.once('listening', r));
+  proxy.close();
+  assert.ok(lines.some((l) => l.includes('pid') && l.includes(String(process.pid))));
+});
+
+test('checkBackend is true for a reachable address and false for an unreachable one', async () => {
+  const backend = http.createServer((_req, res) => res.end('ok'));
+  await new Promise((r) => backend.listen(0, '127.0.0.1', r));
+  const port = backend.address().port;
+  try {
+    assert.strictEqual(await checkBackend(`127.0.0.1:${port}`), true);
+  } finally {
+    await new Promise((r) => backend.close(r));
+  }
+  assert.strictEqual(await checkBackend('127.0.0.1:1'), false);
+});
+
+test('a bare -P port is resolved against localhost', async () => {
+  const backend = http.createServer((_req, res) => res.end('ok'));
+  await new Promise((r) => backend.listen(0, r));
+  const port = backend.address().port;
+  assert.strictEqual(await checkBackend(String(port)), true);
+  await new Promise((r) => backend.close(r));
 });

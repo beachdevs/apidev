@@ -1,11 +1,31 @@
 import http from 'node:http';
 import https from 'node:https';
+import net from 'node:net';
 
 const hopByHop = new Set(['connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade']);
 const MAX_LOG = 64 * 1024;
 const dim = (s) => `\x1b[90m${s}\x1b[0m`;
 
-const resolveBackend = (backend) => !backend ? null : /^[a-z][a-z0-9+.-]*:\/\//i.test(backend) ? backend : `http://${backend}`;
+// A bare port (e.g. "3000") means the backend lives on localhost.
+const resolveBackend = (backend) => {
+  if (!backend) return null;
+  if (/^\d+$/.test(backend)) return `http://localhost:${backend}`;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(backend) ? backend : `http://${backend}`;
+};
+
+// Verify the backend can be reached (plain TCP connect) before we start serving.
+export async function checkBackend(backend, timeout = 2000) {
+  const url = new URL(resolveBackend(backend));
+  const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+  const host = url.hostname;
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (ok) => { socket.destroy(); resolve(ok); };
+    socket.setTimeout(timeout, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
 
 const rawHeaders = (rawHeaders) => {
   const lines = [];
@@ -84,6 +104,6 @@ export function startProxy({ port = 8080, backend, out = console.log } = {}) {
   server.on('clientError', (_e, socket) => {
     if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   });
-  server.listen(port, () => out(`apic proxy listening on :${port}${base ? ` -> ${base}` : ''}`));
+  server.listen(port, () => out(`apic proxy started on :${port} (pid ${process.pid})${base ? ` -> ${base}` : ''}`));
   return server;
 }
