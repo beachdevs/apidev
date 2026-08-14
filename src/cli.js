@@ -123,7 +123,7 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
     const t0 = time ? process.hrtime.bigint() : null;
     let elapsed;
     if (isWs) {
-      await fetchWS(service, name, { ...opts, onMessage: (_msg, ctx) => out(ctx.raw) });
+      await fetchWS(service, name, { ...opts, onMessage: (_msg, ctx) => out(api?.jq ? runJq(api.jq, ctx.raw).trimEnd() : ctx.raw) });
       if (t0) elapsed = (Number(process.hrtime.bigint() - t0) / 1e6).toFixed(0);
     } else {
       const response = await fetchApi(service, name, opts);

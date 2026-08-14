@@ -60,6 +60,22 @@ echo.ws:
   body: $!PROMPT
   help: Send PROMPT to an echo WebSocket.
 
+discord.gateway:
+  url: wss://gateway.discord.gg?v=10&encoding=json
+  body: |
+    { "op": 2, "d": { "token": "$!DISCORD_BOT_TOKEN", "intents": 513, "properties": { "os": "macos", "browser": "apicat", "device": "apicat" } } }
+  keep_alive: true
+  timeout: 60
+  jq: 'select(.t == "MESSAGE_CREATE") | .d.content'
+  help: |
+    Connect to the Discord WebSocket gateway and identify. Requires DISCORD_BOT_TOKEN.
+    Set intents (513 = guilds+members) as needed; responses are streamed via onMessage.
+
+openrouter.credits:
+  url: https://openrouter.ai/api/v1/credits
+  headers:
+    Authorization: "Bearer $!OPENROUTER_MANAGEMENT_API_KEY"
+
 openrouter.chat:
   url: https://openrouter.ai/api/v1/chat/completions
   method: POST
@@ -92,6 +108,41 @@ ollama.localmodels:
   url: http://localhost:11434/api/tags
   method: GET
   help: List models available from a local Ollama server.
+
+mlx.chat:
+  url: http://localhost:8080/v1/chat/completions
+  method: POST
+  headers:
+    Content-Type: application/json
+  body: |
+    { 
+      "model": "$!MLX_MODEL",
+      "messages": [{"role": "user", "content": "$!PROMPT"}],
+      "temperature": 0.7
+    }
+  jq: .choices[0].message.content
+  help: Start server mlx_lm.server 
+
+mlx.localmodels:
+  url: http://localhost:8080/v1/models
+  jq: .data[].id
+
+mlx.models:
+  url: https://huggingface.co/api/models?author=mlx-community
+  jq: .[].id
+  help: Mlx tagged models on Huggingface. Not guaranteed to work on mlx but try it.
+
+basert.chat:
+  method: POST
+  url: http://127.0.0.1:8453/v1/chat/completions
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}]
+    }
+  jq: .choices[0].message.content
+  help: basert serve --model google/gemma-4-E2B-it --max-context 8192 --max-tokens 512 --prefix-cache
 
 turboff.chat:
   url: http://127.0.0.1:8080/v1/chat/completions

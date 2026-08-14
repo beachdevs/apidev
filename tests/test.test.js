@@ -142,7 +142,7 @@ test('cli.js module and apicli executable list APIs', async () => {
 
   assert.strictEqual(executable.status, 0);
   assert.strictEqual(executable.stderr, '');
-  assert.match(executable.stdout, /^\n\x1b\[36mcatfact\.getFact\x1b\[0m/m);
+  assert.match(executable.stdout, /^\n\x1b\[36mbasert\.chat\x1b\[0m/m);
   assert.match(executable.stdout, /\n\n$/);
 });
 
