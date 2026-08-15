@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>apicat — YAML-driven API orchestration</title>
+  <meta name="description" content="Define, chain, and run API workflows using clean YAML.">
+  <style>
+    :root {
+      --ink: #11131a;
+      --muted: #59606d;
+      --line: #e4e6eb;
+      --purple: #633cff;
+      --purple-2: #8b5cf6;
+      --terminal: #111315;
+      --green: #43d17a;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #fff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      width: min(1320px, calc(100% - 96px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 58px 0 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 18px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 64px;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: -3px;
+    }
+
+    .cat {
+      width: 78px;
+      height: 78px;
+      color: var(--purple);
+      flex: none;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+      gap: 72px;
+      align-items: center;
+      padding: 72px 0 86px;
+    }
+
+    .eyebrow {
+      color: var(--purple);
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 1.7px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 650px;
+      font-size: clamp(52px, 5.2vw, 82px);
+      line-height: .99;
+      letter-spacing: -4.5px;
+      font-weight: 720;
+    }
+
+    h1 span {
+      color: var(--purple);
+    }
+
+    .lead {
+      max-width: 640px;
+      margin: 38px 0 42px;
+      color: #414854;
+      font-size: 23px;
+      line-height: 1.7;
+      letter-spacing: -.25px;
+    }
+
+    .github {
+      display: inline-flex;
+      align-items: center;
+      gap: 13px;
+      padding: 16px 23px;
+      border: 1px solid #d9dce2;
+      border-radius: 11px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 18px;
+      font-weight: 600;
+      background: #fff;
+      transition: border-color .18s, box-shadow .18s, transform .18s;
+    }
+
+    .github:hover {
+      border-color: #b9b0ff;
+      box-shadow: 0 8px 30px rgba(99, 60, 255, .10);
+      transform: translateY(-1px);
+    }
+
+    .github svg { width: 25px; height: 25px; }
+
+    .terminal-wrap h2 {
+      margin: 0 0 18px;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -.3px;
+      color: #373c47;
+    }
+
+    .terminal {
+      overflow: hidden;
+      border-radius: 17px;
+      background: var(--terminal);
+      color: #f4f5f7;
+      box-shadow: 0 28px 70px rgba(18, 20, 26, .18);
+      border: 1px solid #282b30;
+    }
+
+    .terminal-bar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 20px;
+      border-bottom: 1px solid #292c31;
+      background: #17191c;
+    }
+
+    .dot { width: 14px; height: 14px; border-radius: 50%; }
+    .dot.red { background: #ff5f57; }
+    .dot.yellow { background: #febc2e; }
+    .dot.green { background: #28c840; }
+
+    .terminal-body {
+      min-height: 470px;
+      padding: 28px 30px 32px;
+      font: 16px/1.65 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      outline: none;
+    }
+
+    .line { white-space: pre; }
+    .prompt { color: #fff; }
+    .command { color: var(--green); }
+    .heading { color: #9a7cff; }
+    .name { color: #f6f7f8; }
+    .desc { color: #858b96; }
+    .cursor {
+      display: inline-block;
+      width: 9px;
+      height: 20px;
+      vertical-align: -3px;
+      background: var(--green);
+      animation: blink 1s steps(2, start) infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .terminal-input {
+      display: inline;
+      width: 1px;
+      min-width: 1px;
+      color: white;
+      background: transparent;
+      border: 0;
+      outline: 0;
+      font: inherit;
+      caret-color: var(--green);
+    }
+
+    .terminal-input::selection { background: rgba(99, 60, 255, .4); }
+
+    .terminal-hint {
+      margin-top: 12px;
+      color: #777d87;
+      font-size: 13px;
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    .terminal-hint kbd {
+      color: #c9ccd2;
+      padding: 2px 6px;
+      border: 1px solid #383b40;
+      border-radius: 5px;
+      background: #1d1f23;
+    }
+
+    .values {
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 27px 0;
+      margin-bottom: 40px;
+    }
+
+    .value {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 13px;
+      min-height: 42px;
+      font-size: 18px;
+    }
+
+    .value + .value { border-left: 1px solid var(--line); }
+
+    .value svg {
+      width: 27px;
+      height: 27px;
+      stroke: var(--ink);
+      stroke-width: 1.8;
+      fill: none;
+    }
+
+    @media (max-width: 1050px) {
+      .page { width: min(100% - 48px, 760px); }
+      .hero { grid-template-columns: 1fr; gap: 58px; }
+      .brand { font-size: 52px; }
+      .cat { width: 64px; height: 64px; }
+    }
+
+    @media (max-width: 620px) {
+      .page { width: min(100% - 32px, 560px); }
+      header { padding-top: 32px; }
+      .hero { padding-top: 48px; }
+      h1 { letter-spacing: -3px; }
+      .lead { font-size: 19px; line-height: 1.6; }
+      .values { grid-template-columns: 1fr 1fr; gap: 18px 0; }
+      .value + .value { border-left: 0; }
+      .value:nth-child(3) { border-left: 0; }
+      .terminal-body { padding: 22px 18px; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <a class="brand" href="/" aria-label="apicat home">
+        <svg class="cat" viewBox="0 0 80 80" aria-hidden="true">
+          <path d="M17 29 14 13l15 9c6-3 16-3 22 0l15-9-3 17c3 5 4 10 4 17 0 13-10 21-29 21S9 59 9 46c0-7 3-13 8-17Z"
+                fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/>
+          <circle cx="29" cy="44" r="2.5" fill="currentColor"/>
+          <circle cx="51" cy="44" r="2.5" fill="currentColor"/>
+          <path d="M37 51c2 2 4 2 6 0M40 49v5M40 54l-5 3M40 54l5 3"
+                fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        apicat
+      </a>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">YAML-DRIVEN API ORCHESTRATION</div>
+        <h1>The simple way to <span>orchestrate</span> APIs</h1>
+        <p class="lead">
+          Define, chain, and run API workflows using clean YAML.
+          Capture values, make decisions, and build powerful integrations — without code.
+        </p>
+
+        <a class="github" href="https://github.com/digplan/apicat" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 .7a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.8.1-.8.1-.8 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.4-5.5-6.1 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.7-2.8 5.8-5.5 6.1.4.3.8 1 .8 2v2.8c0 .3.2.7.8.6A12 12 0 0 0 12 .7Z"/>
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <div class="terminal-wrap">
+        <h2>Run from your terminal</h2>
+        <div class="terminal" id="terminal">
+          <div class="terminal-bar">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+          <div class="terminal-body" id="terminalBody" tabindex="0">
+            <div id="output">
+              <div class="line"><span class="prompt">$ </span><span class="command">npx</span> apicat ls</div>
+              <br>
+              <div class="line heading">APIs</div>
+              <div class="line">  <span class="name">github.get_user</span>       <span class="desc">Get a GitHub user</span></div>
+              <div class="line">  <span class="name">github.list_repos</span>     <span class="desc">List repositories</span></div>
+              <div class="line">  <span class="name">github.get_repo</span>       <span class="desc">Get repository details</span></div>
+              <div class="line">  <span class="name">httpbin.get</span>           <span class="desc">HTTP GET example</span></div>
+              <div class="line">  <span class="name">discord.gateway</span>      <span class="desc">Discord Gateway connect</span></div>
+              <br>
+              <div class="line heading">Flows</div>
+              <div class="line">  <span class="name">github.user_repos</span>     <span class="desc">Get user and list repos</span></div>
+              <div class="line">  <span class="name">deploy.webhook</span>        <span class="desc">Trigger deploy via webhook</span></div>
+              <br>
+            </div>
+            <div class="line">
+              <span class="prompt">$ </span><input id="commandInput" class="terminal-input"
+                aria-label="Terminal command" autocomplete="off" spellcheck="false"
+                value="npx apicat ls">
+            </div>
+            <div class="terminal-hint">Press <kbd>Enter</kbd> to run · try <kbd>npx apicat ls</kbd></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="values" aria-label="Features">
+      <div class="value">
+        <svg viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 9-12h-7l1-8Z"/></svg>
+        Fast
+      </div>
+      <div class="value">
+        <svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3Z"/></svg>
+        Secure
+      </div>
+      <div class="value">
+        <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></svg>
+        Simple
+      </div>
+      <div class="value">
+        <svg viewBox="0 0 24 24"><path d="M20.8 8.8c0 5.5-8.8 11-8.8 11S3.2 14.3 3.2 8.8A4.8 4.8 0 0 1 12 6a4.8 4.8 0 0 1 8.8 2.8Z"/></svg>
+        Open Source
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const input = document.querySelector('#commandInput')
+    const output = document.querySelector('#output')
+    const terminal = document.querySelector('#terminalBody')
+
+    const run = () => {
+      const command = input.value.trim()
+      if (!command) return
+      if (command !== 'npx apicat ls') {
+        output.insertAdjacentHTML('beforeend',
+          `<div class="line"><span class="prompt">$ </span>${escapeHtml(command)}</div>` +
+          `<div class="line desc">Try: npx apicat ls</div><br>`
+        )
+      } else {
+        output.insertAdjacentHTML('beforeend',
+          `<div class="line"><span class="prompt">$ </span><span class="command">npx</span> apicat ls</div>` +
+          `<div class="line heading">APIs</div>` +
+          `<div class="line">  <span class="name">github.get_user</span>       <span class="desc">Get a GitHub user</span></div>` +
+          `<div class="line">  <span class="name">github.list_repos</span>     <span class="desc">List repositories</span></div>` +
+          `<div class="line">  <span class="name">github.get_repo</span>       <span class="desc">Get repository details</span></div>` +
+          `<div class="line">  <span class="name">httpbin.get</span>           <span class="desc">HTTP GET example</span></div>` +
+          `<div class="line">  <span class="name">discord.gateway</span>      <span class="desc">Discord Gateway connect</span></div>` +
+          `<br><div class="line heading">Flows</div>` +
+          `<div class="line">  <span class="name">github.user_repos</span>     <span class="desc">Get user and list repos</span></div>` +
+          `<div class="line">  <span class="name">deploy.webhook</span>        <span class="desc">Trigger deploy via webhook</span></div><br>`
+        )
+      }
+      input.value = 'npx apicat ls'
+      terminal.scrollTop = terminal.scrollHeight
+      input.focus()
+    }
+
+    const escapeHtml = (s) => s.replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]))
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') run()
+    })
+
+    document.querySelector('#terminal').addEventListener('click', () => input.focus())
+  </script>
+</body>
+</html>
