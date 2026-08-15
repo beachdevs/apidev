@@ -1,95 +1,20 @@
-httpbin.get:
-  url: https://httpbin.org/get
-  method: GET
-  headers: {}
-  help: Send a GET request to httpbin.org/get.
-
+basert.chat:
+  method: POST
+  url: http://127.0.0.1:8453/v1/chat/completions
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}]
+    }
+  jq: .choices[0].message.content
+  help: basert serve --model google/gemma-4-E2B-it --max-context 8192 --max-tokens 512 --prefix-cache
 catfact.getFact:
   url: https://catfact.ninja/fact
   method: GET
   headers: {}
   jq: .fact
   help: Fetch a random cat fact.
-
-cloudflare.r2Upload:
-  url: https://api.cloudflare.com/client/v4/accounts/$!CLOUDFLARE_ACCOUNT_ID/r2/buckets/$!CLOUDFLARE_BUCKET/objects/$!FILE_NAME
-  method: PUT
-  headers:
-    Authorization: Bearer $!CLOUDFLARE_API_KEY
-  file: $!FILE
-  help: Upload a file to Cloudflare R2. Requires CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_BUCKET, CLOUDFLARE_API_KEY, FILE_NAME, and FILE.
-
-cloudflare.r2Download:
-  url: https://api.cloudflare.com/client/v4/accounts/$!CLOUDFLARE_ACCOUNT_ID/r2/buckets/$!CLOUDFLARE_BUCKET/objects/$!FILE_NAME
-  method: GET
-  headers:
-    Authorization: Bearer $!CLOUDFLARE_API_KEY
-  output: $!FILE_PATH
-  help: Download a Cloudflare R2 object to FILE_PATH. Requires CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_BUCKET, CLOUDFLARE_API_KEY, FILE_NAME, and FILE_PATH.
-
-openai.chat:
-  url: $!OPENAI_URL/v1/chat/completions
-  method: POST
-  headers:
-    Authorization: "Bearer $!OPENAI_API_KEY"
-  body: |
-    {
-      "model": "$!MODEL",
-      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}],
-      "think": false,
-      "stream": false
-    }
-  help: Create an OpenAI-compatible chat completion. Requires OPENAI_URL, OPENAI_API_KEY, MODEL, and PROMPT.
-
-ollama.chat:
-  method: POST
-  url: http://localhost:11434/api/chat
-  headers:
-    Content-Type: application/json
-  body: |
-    {
-      "model": "$!OLLAMA_MODEL",
-      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}],
-      "think": false,
-      "stream": false
-    }
-  help: Generate a response from a local Ollama server. Requires MODEL and PROMPT.
-
-echo.ws:
-  url: wss://echo-websocket.fly.dev/.ws
-  body: $!PROMPT
-  help: Send PROMPT to an echo WebSocket.
-
-discord.gateway:
-  url: wss://gateway.discord.gg?v=10&encoding=json
-  body: |
-    { "op": 2, "d": { "token": "$!DISCORD_BOT_TOKEN", "intents": 513, "properties": { "os": "macos", "browser": "apicat", "device": "apicat" } } }
-  keep_alive: true
-  timeout: 60
-  jq: 'select(.t == "MESSAGE_CREATE") | .d.content'
-  help: |
-    Connect to the Discord WebSocket gateway and identify. Requires DISCORD_BOT_TOKEN.
-    Set intents (513 = guilds+members) as needed; responses are streamed via onMessage.
-
-openrouter.credits:
-  url: https://openrouter.ai/api/v1/credits
-  headers:
-    Authorization: "Bearer $!OPENROUTER_MANAGEMENT_API_KEY"
-
-openrouter.chat:
-  url: https://openrouter.ai/api/v1/chat/completions
-  method: POST
-  headers:
-    Authorization: "Bearer $!API_KEY"
-  body: |
-    {
-      "model": "$!OPENROUTER_MODEL",
-      "messages": [{"role": "user", "content": "$OPTIONAL_PROMPT"}, {"role": "user", "content": "$!PROMPT"}]
-      , "provider": {"order": ["$PROVIDER"]}
-    }
-  jq: .choices[0].message.content
-  help: Create an OpenRouter chat completion. Requires OPENROUTER_API_KEY, OPENROUTER_MODEL, and PROMPT.
-
 cerebras.chat:
   url: https://api.cerebras.ai/v1/chat/completions
   method: POST
@@ -103,12 +28,100 @@ cerebras.chat:
     }
   jq: .choices[0].message.content
   help: Create a Cerebras chat completion. Requires CEREBRAS_API_KEY, CEREBRAS_MODEL, and PROMPT.
-
-ollama.localmodels:
-  url: http://localhost:11434/api/tags
+cerebras.models:
+  url: https://api.cerebras.ai/public/v1/models
+cloudflare.r2Download:
+  url: https://api.cloudflare.com/client/v4/accounts/$!CLOUDFLARE_ACCOUNT_ID/r2/buckets/$!CLOUDFLARE_BUCKET/objects/$!FILE_NAME
   method: GET
-  help: List models available from a local Ollama server.
-
+  headers:
+    Authorization: Bearer $!CLOUDFLARE_API_KEY
+  output: $!FILE_PATH
+  help: Download a Cloudflare R2 object to FILE_PATH. Requires CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_BUCKET, CLOUDFLARE_API_KEY, FILE_NAME, and FILE_PATH.
+cloudflare.r2Upload:
+  url: https://api.cloudflare.com/client/v4/accounts/$!CLOUDFLARE_ACCOUNT_ID/r2/buckets/$!CLOUDFLARE_BUCKET/objects/$!FILE_NAME
+  method: PUT
+  headers:
+    Authorization: Bearer $!CLOUDFLARE_API_KEY
+  file: $!FILE
+  help: Upload a file to Cloudflare R2. Requires CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_BUCKET, CLOUDFLARE_API_KEY, FILE_NAME, and FILE.
+discord.channelpost:
+  url: https://discord.com/api/v10/channels/$!DISCORD_CHANNEL_ID/messages
+  method: POST
+  headers:
+    Content-Type: application/json
+    Authorization: "Bot $!DISCORD_BOT_TOKEN"
+  body: |
+    { "content": "$!POST" }
+  help: |
+    Post a message to a channel using the bot token (not a webhook).
+    Requires DISCORD_CHANNEL_ID and DISCORD_BOT_TOKEN. Grab the channel ID by
+    enabling Developer Mode in Discord and right-clicking the channel.
+discord.gateway:
+  url: wss://gateway.discord.gg?v=10&encoding=json
+  body: |
+    { "op": 2, "d": { "token": "$!DISCORD_BOT_TOKEN", "intents": 33281, "properties": { "os": "macos", "browser": "apicat", "device": "apicat" } } }
+  capture:
+    sequence: .s // empty
+    heartbeat_interval: if .d.heartbeat_interval? then (.d.heartbeat_interval / 1000) else empty end
+  keep_alive:
+    interval: $heartbeat_interval
+    send:
+      op: 1
+      d: $sequence
+    expect:
+      op: 11
+    timeout: 10
+  reconnect:
+    enabled: true
+    initial: 1
+    maximum: 60
+    multiplier: 2
+    jitter: 0.2
+  jq: 'select(.t == "MESSAGE_CREATE" and .d.author.bot != true) | .d.content'
+  help: |
+    Connect to the Discord WebSocket gateway and identify. Requires DISCORD_BOT_TOKEN.
+    Set intents (513 = guilds+members) as needed; responses are streamed via onMessage.
+discord.postwebhook:
+  url: $!DISCORD_WEBHOOK_URL
+  method: POST
+  headers:
+    Content-Type: application/json
+  body: |
+   { "content": "$!POST" }
+  help: Discord Server Settings to create the Webhook URL, it should be in env var DISCORD_WEBHOOK_URL
+echo.ws:
+  url: wss://echo-websocket.fly.dev/.ws
+  body: $!PROMPT
+  help: Send PROMPT to an echo WebSocket.
+echo.keepalive:
+  url: wss://echo-websocket.fly.dev/.ws
+  keep_alive:
+    interval: 30
+    send:
+      type: ping
+    expect:
+      type: ping
+    timeout: 10
+  reconnect:
+    enabled: true
+    initial: 1
+    maximum: 60
+    multiplier: 2
+    jitter: 0.2
+  help: Generic long-lived WebSocket example using declarative heartbeat and reconnect settings.
+httpbin.get:
+  url: https://httpbin.org/get
+  method: GET
+  headers: {}
+  help: Send a GET request to httpbin.org/get.
+inception.chat:
+  url: https://api.inceptionlabs.ai/v1/chat/completions
+  method: POST
+  headers:
+    Content-Type: application/json
+    Authorization: Bearer $!INCEPTION_API_KEY
+  body: |
+    { "model": "mercury-2", "reasoning_effort": "$!REASONING_EFFORT", "messages": [{"role":"user", "content":"$!PROMPT"}] }
 mlx.chat:
   url: http://localhost:8080/v1/chat/completions
   method: POST
@@ -121,29 +134,85 @@ mlx.chat:
       "temperature": 0.7
     }
   jq: .choices[0].message.content
-  help: Start server mlx_lm.server 
-
+  help: Start server mlx_lm.server
 mlx.localmodels:
   url: http://localhost:8080/v1/models
   jq: .data[].id
-
 mlx.models:
   url: https://huggingface.co/api/models?author=mlx-community
   jq: .[].id
   help: Mlx tagged models on Huggingface. Not guaranteed to work on mlx but try it.
-
-basert.chat:
+ollama.chat:
   method: POST
-  url: http://127.0.0.1:8453/v1/chat/completions
+  url: http://localhost:11434/api/chat
   headers:
     Content-Type: application/json
   body: |
     {
-      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}]
+      "model": "$!OLLAMA_MODEL",
+      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}],
+      "think": false,
+      "stream": false
+    }
+  jq: .message.content
+  help: Generate a response from a local Ollama server. Requires MODEL and PROMPT.
+ollama.localmodels:
+  url: http://localhost:11434/api/tags
+  method: GET
+  help: List models available from a local Ollama server.
+openai.models:
+  url: https://api.openai.com/v1/models
+  headers:
+    Content-Type: application/json
+    Authorization: Bearer $!OPENAI_API_KEY
+  jq: .data[].id
+openai.chat:
+  url: https://api.openai.com/v1/chat/completions
+  method: POST
+  headers:
+    Content-Type: application/json
+    Authorization: Bearer $!OPENAI_API_KEY
+  body: |
+    {
+      "model": "$!OPENAI_MODEL",
+      "messages": [{"role": "system", "content": "$SYSTEM_PROMPT"}, {"role": "user", "content": "$!PROMPT"}],
+      "think": false,
+      "stream": false
+    }
+  help: Create an OpenAI-compatible chat completion. Requires OPENAI_URL, OPENAI_API_KEY, MODEL, and PROMPT.
+openrouter.chat:
+  url: https://openrouter.ai/api/v1/chat/completions
+  method: POST
+  headers:
+    Authorization: "Bearer $!OPENROUTER_API_KEY"
+  body: |
+    {
+      "model": "$!OPENROUTER_MODEL",
+      "messages": [{"role": "user", "content": "$OPTIONAL_PROMPT"}, {"role": "user", "content": "$!PROMPT"}]
+      , "provider": {"order": ["$PROVIDER"]}
     }
   jq: .choices[0].message.content
-  help: basert serve --model google/gemma-4-E2B-it --max-context 8192 --max-tokens 512 --prefix-cache
-
+  help: Create an OpenRouter chat completion. Requires OPENROUTER_API_KEY, OPENROUTER_MODEL, and PROMPT.
+openrouter.credits:
+  url: https://openrouter.ai/api/v1/credits
+  headers:
+    Authorization: "Bearer $!OPENROUTER_MANAGEMENT_API_KEY"
+openrouter.endpoints:
+  url: https://openrouter.ai/api/v1/models/$!MODEL/endpoints
+openrouter.models:
+  url: https://openrouter.ai/api/v1/models
+searxng.search:
+  url: $!SEARXNG_BASE_URL/search?q=$!QUERY&format=json
+  help: Set up a server github.com/0x96f/searxng
+tavily.search:
+  url: https://api.tavily.com/search
+  method: POST
+  headers:
+    Content-Type: application/json
+    Authorization: Bearer $!TAVILY_API_KEY
+  body: |
+    { "query": "$!QUERY", "max_results": "3" }
+  help: Set TAVILY_API_KEY in env. Get key at tavily.com.
 turboff.chat:
   url: http://127.0.0.1:8080/v1/chat/completions
   method: POST
@@ -165,35 +234,3 @@ turboff.chat:
         --model scratch/gemma4.gturbo \
         --port 8080 \
         --max-context 16384
-
-discord.post:
-  url: $!DISCORD_WEBHOOK_URL
-  method: POST
-  headers:
-    Content-Type: application/json
-  body: |
-   { "content": "$!POST" }
-  help: Discord Server Settings to create the Webhook URL, it should be in env var DISCORD_WEBHOOK_URL
-
-tavily.search:
-  url: https://api.tavily.com/search
-  method: POST
-  headers:
-    Content-Type: application/json
-    Authorization: Bearer $!TAVILY_API_KEY
-  body: |
-    { "query": "$!QUERY", "max_results": "3" }
-  help: Set TAVILY_API_KEY in env. Get key at tavily.com.
-
-searxng.search:
-  url: $!SEARXNG_BASE_URL/search?q=$!QUERY&format=json
-  help: Set up a server github.com/0x96f/searxng
-
-inception.chat:
-  url: https://api.inceptionlabs.ai/v1/chat/completions
-  method: POST
-  headers:
-    Content-Type: application/json
-    Authorization: Bearer $!INCEPTION_API_KEY
-  body: |
-    { "model": "mercury-2", "reasoning_effort": "$!REASONING_EFFORT", "messages": [{"role":"user", "content":"$!PROMPT"}] }

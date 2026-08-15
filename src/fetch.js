@@ -81,6 +81,12 @@ const walk = (obj, v) => {
   return obj;
 };
 
+const numberOrNull = (value) => {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
 const parseYamlApis = (content) => {
   const data = parseYaml(content);
   if (!data || typeof data !== 'object' || Array.isArray(data)) return [];
@@ -154,7 +160,7 @@ const getMultipartBody = (fields) => {
 
 const buildWsRequest = (api, vars = {}) => {
   if (!api) throw new Error('Missing API definition');
-  let { url, headers, body, keep_alive, timeout, capture } = api;
+  let { url, headers, body, keep_alive, reconnect, timeout, capture } = api;
   url = sub(url, vars);
   if (typeof headers === 'string' && headers.startsWith('BEARER ')) {
     headers = { Authorization: `Bearer ${sub(headers.slice(7).trim(), vars)}` };
@@ -165,7 +171,67 @@ const buildWsRequest = (api, vars = {}) => {
     body = sub(body, vars);
   }
   capture = walk(capture, vars);
-  return { url, headers, body, keep_alive, timeout, capture };
+  return { url, headers, body, keep_alive, reconnect, timeout, capture };
+};
+
+const partialMatch = (actual, expected) => {
+  if (expected == null || typeof expected !== 'object') return actual === expected;
+  if (actual == null || typeof actual !== 'object') return false;
+  if (Array.isArray(expected)) {
+    if (!Array.isArray(actual) || actual.length < expected.length) return false;
+    return expected.every((value, index) => partialMatch(actual[index], value));
+  }
+  return Object.entries(expected).every(([key, value]) => partialMatch(actual[key], value));
+};
+
+export const matchesExpectation = (message, expect) => {
+  if (expect == null) return true;
+  return partialMatch(message, expect);
+};
+
+const resolveWsValue = (value, vars = {}) => {
+  if (typeof value === 'string') {
+    const exact = value.match(/^\$(!?)([A-Za-z_]\w*)$/);
+    if (exact) {
+      const val = vars[exact[2]] ?? process.env[exact[2]];
+      if (exact[1] && val == null) throw new Error(`Variable ${exact[2]} is required`);
+      return val ?? null;
+    }
+    return sub(value, vars);
+  }
+  if (Array.isArray(value)) return value.map(item => resolveWsValue(item, vars));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveWsValue(v, vars)]));
+  return value;
+};
+
+const wsPayload = (value) => {
+  if (value == null) return '';
+  if (typeof value === 'string' || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value;
+  return JSON.stringify(value);
+};
+
+const isKeepAliveConfig = (keepAlive) => keepAlive && typeof keepAlive === 'object';
+
+const isLongLivedWs = (flow) => flow.some(api => api?.keep_alive || api?.reconnect?.enabled);
+
+const reconnectConfig = (flow) => {
+  const configured = flow.find(api => api?.reconnect)?.reconnect;
+  if (!configured?.enabled) return null;
+  return {
+    enabled: true,
+    initial: numberOrNull(configured.initial) ?? 1,
+    maximum: numberOrNull(configured.maximum) ?? 60,
+    multiplier: numberOrNull(configured.multiplier) ?? 2,
+    jitter: numberOrNull(configured.jitter) ?? 0
+  };
+};
+
+export const reconnectDelay = (policy, attempt, random = Math.random) => {
+  const base = Math.min(policy.maximum, policy.initial * (policy.multiplier ** attempt));
+  const jitter = Math.max(0, Number(policy.jitter) || 0);
+  if (!jitter) return base;
+  const factor = 1 + ((random() * 2) - 1) * jitter;
+  return Math.max(0, base * factor);
 };
 
 export function parseJsonResponse(text) {
@@ -206,22 +272,34 @@ export async function fetchApi(s, n, opts = {}) {
 }
 
 export async function fetchWS(s, n, opts = {}) {
-  const { vars = {}, configPath, debug, onMessage } = opts;
+  const { vars = {}, configPath, debug, onMessage, onStatus } = opts;
   const { base, steps } = getFlow(s, n, configPath);
   const flow = steps.length ? steps : (base ? [base] : []);
   if (!flow.length) throw new Error(`Unknown API: ${s}.${n}`);
   const baseDefaults = steps.length ? base : null;
   const captures = {};
-  const sent = new Set();
+  let sent = new Set();
   let ws;
   let current = 0;
-  let timer;
+  let requestTimer;
+  let heartbeatTimer;
+  let livenessTimer;
+  let reconnectTimer;
   let currentReq;
+  let connectionSeq = 0;
+  let settled = false;
+  let userClosing = false;
+  let reconnectAttempt = 0;
+  let stableTimer;
+  const disconnectedSockets = new WeakSet();
 
   const merge = (step) => {
     if (!baseDefaults) return step;
     return { ...baseDefaults, ...step, headers: step.headers ?? baseDefaults.headers, capture: step.capture ?? baseDefaults.capture };
   };
+  const mergedFlow = flow.map(merge);
+  const longLived = isLongLivedWs(mergedFlow);
+  const reconnect = reconnectConfig(mergedFlow);
   const currentApi = () => merge(flow[current]);
   const canAdvance = () => {
     if (!currentReq?.keep_alive) return false;
@@ -233,58 +311,228 @@ export async function fetchWS(s, n, opts = {}) {
   };
 
   await new Promise((resolve, reject) => {
+    const emitStatus = (event) => {
+      if (onStatus) onStatus({ service: s, name: n, ...event });
+    };
+    const closeReason = (event, cause) => {
+      if (cause?.message) return cause.message;
+      if (event?.reason) return event.code ? `${event.code} ${event.reason}` : event.reason;
+      if (event?.code) return `code ${event.code}`;
+      return userClosing ? 'client closed' : 'closed';
+    };
+    const emitConnected = (socket, url) => {
+      emitStatus({ type: 'connected', url, connected: true, reconnectAttempt });
+    };
+    const emitDisconnected = (socket, reason) => {
+      if (!socket || disconnectedSockets.has(socket)) return;
+      disconnectedSockets.add(socket);
+      emitStatus({ type: 'disconnected', reason, connected: false, reconnectAttempt });
+    };
+    const clear = (name) => {
+      if (name === 'request' && requestTimer) clearTimeout(requestTimer), requestTimer = null;
+      if (name === 'heartbeat' && heartbeatTimer) clearTimeout(heartbeatTimer), heartbeatTimer = null;
+      if (name === 'liveness' && livenessTimer) clearTimeout(livenessTimer), livenessTimer = null;
+      if (name === 'reconnect' && reconnectTimer) clearTimeout(reconnectTimer), reconnectTimer = null;
+      if (name === 'stable' && stableTimer) clearTimeout(stableTimer), stableTimer = null;
+    };
+    const stopLiveness = () => {
+      clear('heartbeat');
+      clear('liveness');
+    };
+    const stopReconnect = () => clear('reconnect');
+    const stopAllTimers = () => {
+      clear('request');
+      stopLiveness();
+      stopReconnect();
+      clear('stable');
+    };
     const finish = (err) => {
-      if (timer) clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      stopAllTimers();
+      if (ws && ws.readyState === WebSocket.OPEN && err) {
+        emitDisconnected(ws, err.message);
+        userClosing = true;
+        try { ws.close(); } catch {}
+      }
       if (err) reject(err);
       else resolve();
     };
-    const setTimer = (t) => {
-      if (timer) clearTimeout(timer);
+    const setRequestTimer = (t, seq) => {
+      clear('request');
       if (t == null) return;
-      timer = setTimeout(() => finish(new Error('WebSocket timeout')), t * 1000);
+      requestTimer = setTimeout(() => {
+        if (seq !== connectionSeq || settled) return;
+        finish(new Error('WebSocket connection timeout'));
+      }, t * 1000);
     };
-    const onErr = (e) => finish(e instanceof Error ? e : new Error(String(e)));
-    const onClose = () => {
+    const parseIncoming = (ev) => {
+      const raw = typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString();
+      let msg;
+      try { msg = JSON.parse(raw); } catch {}
+      return { raw, msg };
+    };
+    const send = (value) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(wsPayload(value));
+      return true;
+    };
+    const startLivenessTimeout = () => {
+      if (!isKeepAliveConfig(currentReq?.keep_alive)) return;
+      const timeout = numberOrNull(resolveWsValue(currentReq.keep_alive.timeout, { ...vars, ...captures }));
+      if (timeout == null) return;
+      clear('liveness');
+      livenessTimer = setTimeout(() => {
+        if (settled) return;
+        scheduleReconnect(new Error('WebSocket liveness timeout'), connectionSeq);
+      }, timeout * 1000);
+    };
+    const markAlive = () => {
+      if (!isKeepAliveConfig(currentReq?.keep_alive)) return;
+      clear('liveness');
+      const keepAlive = currentReq.keep_alive;
+      if (keepAlive.send == null && keepAlive.interval == null && keepAlive.timeout != null) startLivenessTimeout();
+    };
+    const sendHeartbeat = () => {
+      if (!isKeepAliveConfig(currentReq?.keep_alive) || settled) return;
+      const keepAlive = currentReq.keep_alive;
+      if (keepAlive.send != null) send(resolveWsValue(keepAlive.send, { ...vars, ...captures }));
+      startLivenessTimeout();
+      scheduleHeartbeat();
+    };
+    const scheduleHeartbeat = () => {
+      if (!isKeepAliveConfig(currentReq?.keep_alive) || settled) return;
+      clear('heartbeat');
+      const interval = numberOrNull(resolveWsValue(currentReq.keep_alive.interval, { ...vars, ...captures }));
+      if (interval == null) return;
+      heartbeatTimer = setTimeout(sendHeartbeat, interval * 1000);
+    };
+    const startLiveness = () => {
+      stopLiveness();
+      if (!isKeepAliveConfig(currentReq?.keep_alive)) return;
+      if (currentReq.keep_alive.interval == null && currentReq.keep_alive.send == null) markAlive();
+      scheduleHeartbeat();
+    };
+    const createWebSocket = (req, seq) => {
+      const options = req.headers && Object.keys(req.headers).length ? { headers: req.headers } : undefined;
+      const socket = new WebSocket(req.url, options);
+      socket.addEventListener('message', (ev) => {
+        if (seq !== connectionSeq || settled) return;
+        onMsg(ev);
+      });
+      socket.addEventListener('close', (event) => {
+        if (seq !== connectionSeq || settled) return;
+        onClose(event, socket);
+      });
+      socket.addEventListener('error', (e) => {
+        if (seq !== connectionSeq || settled) return;
+        onErr(e, socket, seq);
+      });
+      return socket;
+    };
+    const openConnection = () => {
+      stopAllTimers();
+      sent = new Set();
+      current = 0;
+      currentReq = null;
+      connectionSeq += 1;
+      userClosing = false;
+      sendStep(0, false, connectionSeq);
+    };
+    const scheduleReconnect = (cause, seq = connectionSeq) => {
+      stopLiveness();
+      clear('request');
+      emitDisconnected(ws, closeReason(null, cause));
+      if (!reconnect || userClosing) return finish(cause);
+      if (reconnectTimer) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.close(); } catch {}
+      }
+      stopReconnect();
+      const delay = reconnectDelay(reconnect, reconnectAttempt++);
+      reconnectTimer = setTimeout(() => {
+        if (settled) return;
+        openConnection();
+      }, delay * 1000);
+    };
+    const resetReconnectAfterStableConnection = () => {
+      clear('stable');
+      stableTimer = setTimeout(() => {
+        reconnectAttempt = 0;
+      }, 1000);
+    };
+    const onErr = (e, socket, seq) => {
+      const error = e instanceof Error ? e : new Error(String(e));
+      emitDisconnected(socket, error.message);
+      scheduleReconnect(error, seq);
+    };
+    const onClose = (event, socket) => {
+      emitDisconnected(socket, closeReason(event));
       if (current < flow.length - 1) {
         const nextRaw = flow[current + 1];
         if (nextRaw?.url != null) return sendStep(current + 1, false);
       }
+      if (longLived && !userClosing && reconnect) return scheduleReconnect(new Error('WebSocket closed'));
       finish();
     };
     const onMsg = (ev) => {
-      const raw = typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString();
-      let msg;
-      try { msg = JSON.parse(raw); } catch {}
+      const { raw, msg } = parseIncoming(ev);
       const cap = currentReq?.capture || {};
       if (msg && Object.keys(cap).length) {
-        for (const [k, q] of Object.entries(cap)) captures[k] = runJq(q, JSON.stringify(msg)).trim();
+        for (const [k, q] of Object.entries(cap)) {
+          const value = runJq(q, JSON.stringify(msg)).trim();
+          if (value !== '') captures[k] = value;
+        }
       }
-      if (onMessage) onMessage(msg ?? raw, { service: s, name: n, step: current, raw, send: (v) => ws.send(typeof v === 'string' ? v : JSON.stringify(v)), close: () => ws.close(), vars: { ...vars }, captures: { ...captures } });
+      if (isKeepAliveConfig(currentReq?.keep_alive)) {
+        const expect = currentReq.keep_alive.expect;
+        if (expect == null || matchesExpectation(msg ?? raw, expect)) markAlive();
+        if (currentReq.keep_alive.interval != null && !heartbeatTimer) scheduleHeartbeat();
+      }
+      if (onMessage) onMessage(msg ?? raw, {
+        service: s,
+        name: n,
+        step: current,
+        raw,
+        send,
+        close: () => {
+          userClosing = true;
+          if (ws) ws.close();
+        },
+        vars: { ...vars },
+        captures: { ...captures },
+        connected: ws?.readyState === WebSocket.OPEN,
+        reconnecting: Boolean(reconnectTimer),
+        reconnectAttempt
+      });
       if (canAdvance()) sendStep(current + 1, true);
     };
-    const sendStep = (idx, reuse) => {
+    function sendStep(idx, reuse, seq = connectionSeq) {
+      if (settled || seq !== connectionSeq) return;
       current = idx;
       if (sent.has(idx)) return;
       sent.add(idx);
       const v = { ...vars, ...captures };
       currentReq = buildWsRequest(currentApi(), v);
       if (!reuse) {
-        const o = currentReq.headers && Object.keys(currentReq.headers).length ? { headers: currentReq.headers } : undefined;
-        ws = new WebSocket(currentReq.url, o);
-        ws.addEventListener('message', onMsg);
-        ws.addEventListener('close', onClose);
-        ws.addEventListener('error', onErr);
+        stopLiveness();
+        ws = createWebSocket(currentReq, seq);
       }
       const doSend = () => {
+        if (seq !== connectionSeq || settled) return;
+        clear('request');
+        resetReconnectAfterStableConnection();
+        if (!reuse) emitConnected(ws, currentReq.url);
         if (debug) console.error('\x1b[90m> WS %s\x1b[0m', currentReq.url ?? '(reuse)');
-        if (currentReq.body) ws.send(currentReq.body);
+        if (currentReq.body) send(currentReq.body);
+        startLiveness();
         if (canAdvance()) sendStep(current + 1, true);
       };
       if (ws.readyState === WebSocket.OPEN) doSend();
       else ws.addEventListener('open', doSend, { once: true });
-      setTimer(currentReq.timeout);
-    };
-    try { sendStep(0, false); } catch (e) { finish(e); }
+      setRequestTimer(currentReq.timeout, seq);
+    }
+    try { openConnection(); } catch (e) { finish(e); }
   });
 }
 

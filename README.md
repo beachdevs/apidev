@@ -22,7 +22,7 @@ $ apic httpbin.get
 ```
 
 ```
-🔌 apicat v0.3.11 — call APIs (apic)
+🔌 apicat v0.3.24 — call APIs (apic)
 
 Commands
   apic <service.name> [k=v …]  Call API with optional params
@@ -49,6 +49,7 @@ If you want an AI to learn your API definitions, tell it:
 - One command: `apic`
 - One bundled config file: `~/.apicat`
 - HTTP and WebSocket support
+- Declarative WebSocket keep-alive, liveness checks, and reconnect
 - Simple forward proxy: `apic proxy -p <port> [-P <backend host:port>]`
 - Variables with `$VAR` and required variables with `$!VAR`
 - Works as a CLI, a library, and an exported CLI module
@@ -198,6 +199,41 @@ console.log(data.choices[0].message.content);
 
 ## YAML config
 Simple! See apicat.yaml.
+
+### WebSocket keep-alive and reconnect
+
+WebSocket APIs can be finite request/response calls or long-lived listeners. Long-lived protocols can define heartbeat, liveness, and reconnect behavior declaratively in YAML:
+
+```yaml
+example.listener:
+  url: wss://example.com/socket
+  capture:
+    sequence: .s
+    heartbeat_interval: .d.heartbeat_interval / 1000
+  keep_alive:
+    interval: $heartbeat_interval
+    send:
+      op: 1
+      d: $sequence
+    expect:
+      op: 11
+    timeout: 10
+  reconnect:
+    enabled: true
+    initial: 1
+    maximum: 60
+    multiplier: 2
+    jitter: 0.2
+```
+
+`capture` values are available to later WebSocket flow steps and heartbeat messages. `expect` is matched as a partial object, so `op: 11` matches any incoming JSON message whose `op` field is `11`.
+
+When called from the CLI, WebSocket connection status is written to stderr with comment-style prefixes:
+
+```text
+# Connected to: wss://example.com/socket
+# Disconnected (closed)
+```
 
 ### File uploads
 
