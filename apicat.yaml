@@ -93,22 +93,6 @@ echo.ws:
   url: wss://echo-websocket.fly.dev/.ws
   body: $!PROMPT
   help: Send PROMPT to an echo WebSocket.
-echo.keepalive:
-  url: wss://echo-websocket.fly.dev/.ws
-  keep_alive:
-    interval: 30
-    send:
-      type: ping
-    expect:
-      type: ping
-    timeout: 10
-  reconnect:
-    enabled: true
-    initial: 1
-    maximum: 60
-    multiplier: 2
-    jitter: 0.2
-  help: Generic long-lived WebSocket example using declarative heartbeat and reconnect settings.
 httpbin.get:
   url: https://httpbin.org/get
   method: GET
@@ -201,6 +185,35 @@ openrouter.endpoints:
   url: https://openrouter.ai/api/v1/models/$!MODEL/endpoints
 openrouter.models:
   url: https://openrouter.ai/api/v1/models
+  jq: |
+    def pad: tostring | if length==1 then "00"+. elif length==2 then "0"+. else . end;
+    def f3: (. * 1000 | round) as $m | (($m/1000)|floor) as $i | ($m % 1000) as $f | "\($i).\($f|pad)";
+    (["Model","Input/1M","Output/1M","Cached/1M"],
+     ([.data[] | [.id,
+       (((((.pricing.prompt // 0)|tonumber)*1000000*1000|round)/1000)|f3),
+       (((((.pricing.completion // 0)|tonumber)*1000000*1000|round)/1000)|f3),
+       (((((.pricing.input_cache_read // 0)|tonumber)*1000000*1000|round)/1000)|f3)]]
+      | sort_by(.[0])
+      | .[]))
+    | @tsv
+
+openrouter.pricing:
+  url: https://openrouter.ai/api/v1/models/$!MODELID/endpoints
+  jq: |
+    def pad: tostring | if length==1 then "00"+. elif length==2 then "0"+. else . end;
+    def f3: (. * 1000 | round) as $m | (($m/1000)|floor) as $i | ($m % 1000) as $f | "\($i).\($f|pad)";
+    (["provider/model","provider","prompt $/1M","completion $/1M","cache-read $/1M"],
+     ([.data.endpoints[] | [.model_id, .provider_name,
+        (((.pricing.prompt // 0)|tonumber)*1000000),
+        (((.pricing.completion // 0)|tonumber)*1000000),
+        (((.pricing.input_cache_read // 0)|tonumber)*1000000)]]
+      | sort_by(.[0])
+      | .[]
+      | [.[0], .[1], (.[2]|f3), (.[3]|f3), (.[4]|f3)]))
+    | @tsv
+  help: |
+    List all providers serving MODELID with their per-1M pricing.
+    Columns: provider/model, provider, prompt $/1M, completion $/1M, cache-read $/1M.
 searxng.search:
   url: $!SEARXNG_BASE_URL/search?q=$!QUERY&format=json
   help: Set up a server github.com/0x96f/searxng

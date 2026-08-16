@@ -22,7 +22,7 @@ $ apic httpbin.get
 ```
 
 ```
-🔌 apicat v0.3.24 — call APIs (apic)
+🔌 apicat v0.3.25 — call APIs (apic)
 
 Commands
   apic <service.name> [k=v …]  Call API with optional params
@@ -32,7 +32,8 @@ Commands
 
 Options
   apic <service.name> --time          Show request duration
-  apic <service.name> --debug         Show fetch request/response info
+  apic <service.name> --debug         Show fetch request/response info + full response body
+  apic <service.name> --response      Output raw response (skip jq filter)
   apic --config <path> httpbin.get    Use custom config file instead of ~/.apicat
 ```
 
@@ -80,6 +81,11 @@ apic --config ./custom.yaml ls
 # time or debug your calls
 apic httpbin.get --time
 apic httpbin.get --debug
+# debug also prints the full raw response body to stderr,
+# even when the API's jq filter would normally trim it
+
+# output the raw response, skipping any jq filter
+apic httpbin.get --response
 
 # refresh ~/.apicat from the published apicat.yaml
 apic update

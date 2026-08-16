@@ -23,13 +23,14 @@ ${c.bold}Commands${c.reset}
 ${c.bold}Options${c.reset}
   ${c.cyan}apic <service.name> --time${c.reset}          Show request duration
   ${c.cyan}apic <service.name> --debug${c.reset}         Show fetch request/response info
+  ${c.cyan}apic <service.name> --response${c.reset}       Output raw response (skip jq filter)
   ${c.cyan}apic --config <path> httpbin.get${c.reset}    Use custom config file instead of ${c.dim}~/.apicat${c.reset}
 `;
 
 export const formatResponse = (text, jq) => jq ? runJq(jq, text).trimEnd() : JSON.stringify(parseJsonResponse(text), null, 2);
 
 export const parseArgs = (raw = []) => {
-  const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P'];
+  const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P', '-response', '--response'];
   const configIdx = raw.findIndex(a => a === '-config' || a === '--config');
   const portIdx = raw.indexOf('-p');
   const backendIdx = raw.indexOf('-P');
@@ -39,7 +40,7 @@ export const parseArgs = (raw = []) => {
   const skip = new Set();
   for (const i of [configIdx, portIdx, backendIdx]) if (i >= 0) skip.add(i).add(i + 1);
   const args = raw.filter((a, i) => !flags.includes(a) && !skip.has(i));
-  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null, port: portIdx >= 0 ? raw[portIdx + 1] : null, proxyBackend: backendIdx >= 0 ? raw[backendIdx + 1] : null };
+  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), response: raw.includes('-response') || raw.includes('--response'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null, port: portIdx >= 0 ? raw[portIdx + 1] : null, proxyBackend: backendIdx >= 0 ? raw[backendIdx + 1] : null };
 };
 
 export async function runCli(raw = process.argv.slice(2), io = {}) {
@@ -48,7 +49,7 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
   const bundledConfigPath = io.bundledConfigPath ?? defaultBundledConfigPath;
   const hasUser = () => fs.existsSync(userConfigPath);
   const cfg = (p) => p ?? (hasUser() ? userConfigPath : (fs.existsSync(bundledConfigPath) ? bundledConfigPath : null));
-  const { error, args, arg, pattern, time, debug, help, configPath, port, proxyBackend } = parseArgs(raw);
+  const { error, args, arg, pattern, time, debug, response, help, configPath, port, proxyBackend } = parseArgs(raw);
   const re = (s) => new RegExp(s.replace(/\*/g, '.*'), 'i');
   const printConfig = () => { const p = cfg(configPath); if (p) err(configPath ? 'config:' : hasUser() ? 'user:   ' : 'bundled:', p); };
   const search = (rx) => { const p = cfg(configPath); if (p && fs.existsSync(p)) for (const l of fs.readFileSync(p, 'utf8').split('\n')) if (rx.test(l)) out(l); };
@@ -125,7 +126,10 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
     if (isWs) {
       await fetchWS(service, name, {
         ...opts,
-        onMessage: (_msg, ctx) => out(api?.jq ? runJq(api.jq, ctx.raw).trimEnd() : ctx.raw),
+        onMessage: (_msg, ctx) => {
+          if (debug) err(`\n\x1b[90m< WS message:\n%s\x1b[0m`, ctx.raw);
+          out(response ? ctx.raw : (api?.jq ? runJq(api.jq, ctx.raw).trimEnd() : ctx.raw));
+        },
         onStatus: (event) => {
           if (event.type === 'connected') err(`# Connected to: ${event.url}`);
           if (event.type === 'disconnected') err(`# Disconnected (${event.reason})`);
@@ -133,15 +137,16 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
       });
       if (t0) elapsed = (Number(process.hrtime.bigint() - t0) / 1e6).toFixed(0);
     } else {
-      const response = await fetchApi(service, name, opts);
+      const res = await fetchApi(service, name, opts);
       if (t0) elapsed = (Number(process.hrtime.bigint() - t0) / 1e6).toFixed(0);
       const { output } = getRequest(service, name, params, p);
-      if (output && response.ok) {
-        fs.writeFileSync(output, Buffer.from(await response.arrayBuffer()));
+      if (output && res.ok) {
+        fs.writeFileSync(output, Buffer.from(await res.arrayBuffer()));
         out(output);
       } else {
-        const text = await response.text();
-        out(formatResponse(text, api?.jq));
+        const text = await res.text();
+        if (debug) err(`\n\x1b[90m< response body:\n%s\x1b[0m`, text);
+        out(response ? text : formatResponse(text, api?.jq));
       }
     }
     if (elapsed) err(`\x1b[90m%ims\x1b[0m`, elapsed);
