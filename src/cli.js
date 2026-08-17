@@ -29,6 +29,27 @@ ${c.bold}Options${c.reset}
 
 export const formatResponse = (text, jq) => jq ? runJq(jq, text).trimEnd() : JSON.stringify(parseJsonResponse(text), null, 2);
 
+const apiParams = (api) => {
+  const vars = new Map();
+  const scan = (v) => {
+    if (typeof v === 'string') {
+      for (const m of v.matchAll(/(\$\$)|(\$!?)([A-Za-z_]\w*)/g)) {
+        if (m[1]) continue;
+        const name = m[3], req = m[2].includes('!');
+        vars.set(name, (vars.get(name) ?? false) || req);
+      }
+    } else if (Array.isArray(v)) for (const x of v) scan(x);
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) scan(x);
+  };
+  for (const f of ['url', 'headers', 'body', 'file', 'multipart', 'output']) {
+    if (f === 'body' && api.body != null) scan(String(api.body));
+    else scan(api[f]);
+  }
+  return [...vars.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([name, req]) => `${name}${req ? '!' : ''}`);
+};
+
 export const parseArgs = (raw = []) => {
   const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P', '-response', '--response'];
   const configIdx = raw.findIndex(a => a === '-config' || a === '--config');
@@ -99,7 +120,10 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
     out('');
     for (const a of getApis(cfg(configPath)).sort((a, b) => (a.id ?? `${a.service}.${a.name}`).localeCompare(b.id ?? `${b.service}.${b.name}`))) {
       const id = a.id ?? `${a.service}.${a.name}`;
-      if (re(pattern).test(id)) out(`${c.cyan}${id}${c.reset}`);
+      if (re(pattern).test(id)) {
+        const params = apiParams(a);
+        out(params.length ? `${c.cyan}${id}${c.reset} [${params.join(', ')}]` : `${c.cyan}${id}${c.reset}`);
+      }
     }
     out('');
     return 0;
