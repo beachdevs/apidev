@@ -93,6 +93,116 @@ echo.ws:
   url: wss://echo-websocket.fly.dev/.ws
   body: $!PROMPT
   help: Send PROMPT to an echo WebSocket.
+github.prClose:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER
+  method: PATCH
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+    Content-Type: application/json
+  body: |
+    { "state": "closed" }
+  jq: .state
+  help: Close PR NUMBER in REPO (owner/repo) without merging. Requires GITHUB_TOKEN, REPO, and NUMBER.
+github.prComment:
+  url: https://api.github.com/repos/$!REPO/issues/$!NUMBER/comments
+  method: POST
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+    Content-Type: application/json
+  body: |
+    { "body": "$!BODY" }
+  jq: .html_url
+  help: Comment on PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, NUMBER, and BODY.
+github.prComments:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER/comments
+  method: GET
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  jq: |
+    .[] | "\(.user.login)\t\(.created_at)\t\(.path):\(.line // .original_line // "")\t\(.body)"
+  help: List inline review comments on PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, and NUMBER.
+github.prDiff:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER
+  method: GET
+  headers:
+    Accept: application/vnd.github.v3.diff
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  help: Print the raw unified diff of PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, and NUMBER. No jq; output is the diff text.
+github.prFiles:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER/files
+  method: GET
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  jq: |
+    .[] | "\(.status)\t+\(.additions)/-\(.deletions)\t\(.filename)"
+  help: List changed files in PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, and NUMBER.
+github.prGet:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER
+  method: GET
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  jq: |
+    "\(.user.login)\t\(.state)\t\(.title)\n\n\(.body // "")"
+  help: "Read PR NUMBER in REPO (owner/repo): author, state, title, and body. Requires GITHUB_TOKEN, REPO, and NUMBER."
+github.prList:
+  url: https://api.github.com/repos/$!REPO/pulls?state=$STATE
+  method: GET
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  jq: |
+    .[] | "\(.number)\t\(.state)\t\(.user.login)\t\(.title)"
+  help: |
+    List pull requests in REPO (owner/repo). Requires GITHUB_TOKEN and REPO.
+    Optional STATE: open (default), closed, or all.
+github.prMerge:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER/merge
+  method: PUT
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+    Content-Type: application/json
+  jq: .merged
+  help: |
+    Merge PR NUMBER in REPO (owner/repo) using the repo's default merge method.
+    Requires GITHUB_TOKEN, REPO, and NUMBER.
+github.prReview:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER/reviews
+  method: POST
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+    Content-Type: application/json
+  body: |
+    { "event": "$!EVENT", "body": "$!BODY" }
+  jq: .html_url
+  help: |
+    Submit a review on PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, NUMBER, EVENT, and BODY.
+    EVENT is one of APPROVE, REQUEST_CHANGES, or COMMENT.
+github.prReviews:
+  url: https://api.github.com/repos/$!REPO/pulls/$!NUMBER/reviews
+  method: GET
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+    Authorization: Bearer $!GITHUB_TOKEN
+  jq: |
+    .[] | "\(.user.login)\t\(.state)\t\(.submitted_at)\t\(.body // "")"
+  help: List reviews left on PR NUMBER in REPO (owner/repo). Requires GITHUB_TOKEN, REPO, and NUMBER.
 httpbin.get:
   url: https://httpbin.org/get
   method: GET
@@ -181,6 +291,24 @@ openrouter.credits:
   url: https://openrouter.ai/api/v1/credits
   headers:
     Authorization: "Bearer $!OPENROUTER_MANAGEMENT_API_KEY"
+openrouter.key:
+  url: https://openrouter.ai/api/v1/key
+  headers:
+    Authorization: "Bearer $!OPENROUTER_API_KEY"
+  jq: |
+    def f2: tonumber*100 | round/100 | tostring;
+    (["field","value"],
+     ([["label",.data.label],
+       ["limit",(.data.limit // "unlimited" | if . == "unlimited" then . else f2 end)],
+       ["limit_remaining",(.data.limit_remaining // "unlimited" | if . == "unlimited" then . else f2 end)],
+       ["usage",(.data.usage // 0 | f2)],
+       ["usage_today",(.data.usage_daily // 0 | f2)],
+       ["usage_week",(.data.usage_weekly // 0 | f2)],
+       ["usage_month",(.data.usage_monthly // 0 | f2)],
+       ["free_tier",(.data.is_free_tier // false | tostring)]]
+      | .[]))
+    | @tsv
+  help: Show current OpenRouter API key credits, usage, and limits. Requires OPENROUTER_API_KEY.
 openrouter.endpoints:
   url: https://openrouter.ai/api/v1/models/$!MODEL/endpoints
 openrouter.models:
