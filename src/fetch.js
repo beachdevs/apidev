@@ -6,16 +6,30 @@ import { fileURLToPath } from 'node:url';
 import { parseYaml } from './yaml.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const userConfigPath = () => join(homedir(), '.apicat');
-const bundledConfigPath = join(root, 'apicat.yaml');
-const isReadableFile = (path) => {
+export const defaultLocalConfigPath = () => join(process.cwd(), '.apicat');
+export const defaultUserConfigPath = () => join(homedir(), '.apicat');
+export const defaultLocalYamlConfigPath = () => join(process.cwd(), 'apicat.yaml');
+export const defaultBundledConfigPath = join(root, 'apicat.yaml');
+
+export const isReadableFile = (path) => {
+  if (!path) return false;
   try {
     return fs.statSync(path).isFile();
   } catch {
     return false;
   }
 };
-const resolveDefaultConfigPath = () => [userConfigPath(), bundledConfigPath].find(isReadableFile);
+
+const resolveDefaultConfigPath = (opts = {}) => {
+  const cwd = opts.cwd ?? process.cwd();
+  const local = opts.localConfigPath ?? join(cwd, '.apicat');
+  if (isReadableFile(local)) return local;
+  const user = opts.userConfigPath ?? join(homedir(), '.apicat');
+  if (isReadableFile(user)) return user;
+  const bundled = opts.bundledConfigPath ?? defaultBundledConfigPath;
+  if (isReadableFile(bundled)) return bundled;
+  return null;
+};
 
 export const runJq = (q, input) => {
   const filter = /^[A-Za-z_][A-Za-z0-9_.]*$/.test(String(q).trim()) ? `.${q}` : q;
@@ -93,26 +107,55 @@ const parseYamlApis = (content) => {
   return Object.entries(data).map(([id, api]) => ({ ...parseId(id), ...api }));
 };
 
-export function getApis(configPath) {
-  const path = configPath ?? resolveDefaultConfigPath();
+const loadApisFromFile = (path) => {
   if (!path || !isReadableFile(path)) return [];
   const content = fs.readFileSync(path, 'utf8');
   if (path.endsWith('.txt')) {
     return parseTxt(content).apis.map(a => ({ ...parseId(`${a.service}.${a.name}`), ...a }));
   }
   return parseYamlApis(content);
+};
+
+export function getApis(configPath, options = {}) {
+  if (typeof configPath === 'string') {
+    return loadApisFromFile(configPath);
+  }
+  const opts = (configPath && typeof configPath === 'object') ? configPath : options;
+  const basePath = resolveDefaultConfigPath(opts);
+  const baseApis = loadApisFromFile(basePath);
+
+  const cwd = opts.cwd ?? process.cwd();
+  const localYamlConfigPath = opts.localYamlConfigPath ?? join(cwd, 'apicat.yaml');
+  const hasLocalYaml = isReadableFile(localYamlConfigPath);
+
+  if (!hasLocalYaml || (basePath && localYamlConfigPath === basePath)) {
+    return baseApis;
+  }
+
+  const localYamlApis = loadApisFromFile(localYamlConfigPath);
+  if (!localYamlApis.length) return baseApis;
+  if (!baseApis.length) return localYamlApis;
+
+  const map = new Map();
+  for (const api of baseApis) {
+    map.set(api.id, api);
+  }
+  for (const api of localYamlApis) {
+    map.set(api.id, api);
+  }
+  return Array.from(map.values());
 }
 
-export const getApi = (s, n, p) => getApis(p).find(a => a.service === s && a.name === n);
-export const getFlow = (s, n, p) => {
-  const all = getApis(p).filter(a => a.service === s);
+export const getApi = (s, n, p, options) => getApis(p, options).find(a => a.service === s && a.name === n);
+export const getFlow = (s, n, p, options) => {
+  const all = getApis(p, options).filter(a => a.service === s);
   const base = all.find(a => a.name === n);
   const steps = all.filter(a => a.base === n && a.step != null).sort((a, b) => a.step - b.step);
   return { base, steps };
 };
 
-export function getRequest(s, n, vars = {}, p) {
-  const api = getApi(s, n, p);
+export function getRequest(s, n, vars = {}, p, options) {
+  const api = getApi(s, n, p, options);
   if (!api) throw new Error(`Unknown API: ${s}.${n}`);
   const v = { ...vars }, provider = v.PROVIDER ?? process.env.PROVIDER;
   let { url, method, headers, body, file, multipart, output } = api;
@@ -256,7 +299,7 @@ export function parseJsonResponse(text) {
 
 export async function fetchApi(s, n, opts = {}) {
   const { vars = {}, configPath, debug, ...rest } = opts;
-  const req = getRequest(s, n, { ...vars, ...rest }, configPath);
+  const req = getRequest(s, n, { ...vars, ...rest }, configPath, opts);
   if (debug) {
     console.error('\x1b[90m> %s %s\x1b[0m\n\x1b[90m> headers:\n%s\x1b[0m', req.method, req.url, 
       Object.entries(req.headers || {}).map(([k, v]) => `${k}: ${v}`).join('\n'));
@@ -272,8 +315,8 @@ export async function fetchApi(s, n, opts = {}) {
 }
 
 export async function fetchWS(s, n, opts = {}) {
-  const { vars = {}, configPath, debug, onMessage, onStatus } = opts;
-  const { base, steps } = getFlow(s, n, configPath);
+  const { vars = {}, configPath, debug, onMessage, onStatus, ...rest } = opts;
+  const { base, steps } = getFlow(s, n, configPath, opts);
   const flow = steps.length ? steps : (base ? [base] : []);
   if (!flow.length) throw new Error(`Unknown API: ${s}.${n}`);
   const baseDefaults = steps.length ? base : null;

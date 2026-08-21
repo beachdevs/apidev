@@ -59,6 +59,8 @@ If you want an AI to learn your API definitions, tell it:
 
 On first interactive run, it can copy the bundled `apicat.yaml` to `~/.apicat`. Edit to your liking.
 
+When an `.apicat` file exists in the current directory, it automatically overrides `~/.apicat`. If an `apicat.yaml` file exists in the current directory, those definitions get added to what is in `~/.apicat` (or `./.apicat`) for the client to use.
+
 Variables can be defined in the call or will be used if named the same in env.
 
 API IDs use `<service>.<name>` form, like `httpbin.get`, `openai.chat`, or `echo.ws`.
@@ -181,7 +183,7 @@ const res = await fetchApi('httpbin', 'get', {
 });
 ```
 
-Without `configPath`, apicat uses `~/.apicat` when present, otherwise its bundled `apicat.yaml`.
+Without `configPath`, apicat checks for `.apicat` in the current directory (which overrides `~/.apicat`), falls back to `~/.apicat` when present (or the bundled `apicat.yaml`), and merges in any definitions from `apicat.yaml` found in the current directory.
 
 For an OpenRouter chat completion, pass the values referenced by the `openrouter.chat` definition in `vars`:
 

@@ -13,9 +13,11 @@ export async function ensureUserConfig(options = {}) {
   const {
     arg,
     configPath,
+    localConfigPath = join(process.cwd(), '.apicat'),
     userConfigPath = defaultUserConfigPath,
     bundledConfigPath = defaultBundledConfigPath,
     createInterfaceFn = createInterface,
+    hasLocalConfig = (path) => fs.existsSync(path),
     hasUserConfig = (path) => fs.existsSync(path),
     bundledExists = (path) => fs.existsSync(path),
     stdinIsTTY = process.stdin.isTTY,
@@ -24,7 +26,7 @@ export async function ensureUserConfig(options = {}) {
     stderr = console.error
   } = options;
 
-  if (arg === 'update' || configPath || hasUserConfig(userConfigPath) || !bundledExists(bundledConfigPath) || !stdinIsTTY || !stdoutIsTTY) return;
+  if (arg === 'update' || configPath || (localConfigPath && hasLocalConfig(localConfigPath)) || hasUserConfig(userConfigPath) || !bundledExists(bundledConfigPath) || !stdinIsTTY || !stdoutIsTTY) return;
 
   const rl = createInterfaceFn({ input: process.stdin, output: process.stdout });
   try {

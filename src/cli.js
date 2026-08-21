@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { fetchApi, fetchWS, getApi, getApis, getFlow, getRequest, parseJsonResponse, runJq } from './fetch.js';
+import { join } from 'node:path';
+import { fetchApi, fetchWS, getApi, getApis, getFlow, getRequest, isReadableFile, parseJsonResponse, runJq } from './fetch.js';
 import { ensureUserConfig, defaultUserConfigPath, defaultBundledConfigPath } from './install.js';
 import { startProxy, checkBackend } from './proxy.js';
 import { parseYaml } from './yaml.js';
@@ -17,8 +18,8 @@ ${c.bold}Commands${c.reset}
   ${c.cyan}apic ls|list${c.reset} [pattern]       List APIs
   ${c.cyan}apic update${c.reset}                  Copy latest published ${c.dim}.apicat${c.reset} to ${c.dim}~/.apicat${c.reset}
   ${c.cyan}apic <service.name> --help${c.reset}   Show help for this api call
-  ${c.cyan}apic proxy -p <port>${c.reset} [${c.dim}-P <backend host:port>${c.reset}]
-                       Forward HTTP requests; -P pins the backend target
+  ${c.cyan}apic proxy -p <port>${c.reset} [${c.dim}-P <backend host:port>${c.reset}] [${c.dim}-B <env key name>${c.reset}]
+                       Forward HTTP requests; -P pins the backend target, -B adds a Bearer auth header from an env var
 
 ${c.bold}Options${c.reset}
   ${c.cyan}apic <service.name> --time${c.reset}          Show request duration
@@ -51,37 +52,78 @@ const apiParams = (api) => {
 };
 
 export const parseArgs = (raw = []) => {
-  const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P', '-response', '--response'];
+  const flags = ['-time', '--time', '-debug', '--debug', '-h', '--help', '-p', '-P', '-B', '--bearer', '-response', '--response'];
   const configIdx = raw.findIndex(a => a === '-config' || a === '--config');
   const portIdx = raw.indexOf('-p');
   const backendIdx = raw.indexOf('-P');
+  const bearerIdx = raw.findIndex(a => a === '-B' || a === '--bearer');
   if (configIdx >= 0 && (!raw[configIdx + 1] || raw[configIdx + 1].startsWith('-'))) return { error: 'Error: -config requires a file path' };
   if (portIdx >= 0 && (!raw[portIdx + 1] || raw[portIdx + 1].startsWith('-'))) return { error: 'Error: -p requires a port' };
   if (backendIdx >= 0 && (!raw[backendIdx + 1] || raw[backendIdx + 1].startsWith('-'))) return { error: 'Error: -P requires a backend host:port' };
+  if (bearerIdx >= 0 && (!raw[bearerIdx + 1] || raw[bearerIdx + 1].startsWith('-'))) return { error: 'Error: --bearer requires an env key name' };
   const skip = new Set();
-  for (const i of [configIdx, portIdx, backendIdx]) if (i >= 0) skip.add(i).add(i + 1);
+  for (const i of [configIdx, portIdx, backendIdx, bearerIdx]) if (i >= 0) skip.add(i).add(i + 1);
   const args = raw.filter((a, i) => !flags.includes(a) && !skip.has(i));
-  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), response: raw.includes('-response') || raw.includes('--response'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null, port: portIdx >= 0 ? raw[portIdx + 1] : null, proxyBackend: backendIdx >= 0 ? raw[backendIdx + 1] : null };
+  return { args, arg: args[0], pattern: args[1] ?? '.', time: raw.includes('-time') || raw.includes('--time'), debug: raw.includes('-debug') || raw.includes('--debug'), response: raw.includes('-response') || raw.includes('--response'), help: raw.includes('-h') || raw.includes('--help'), configPath: configIdx >= 0 ? raw[configIdx + 1] : null, port: portIdx >= 0 ? raw[portIdx + 1] : null, proxyBackend: backendIdx >= 0 ? raw[backendIdx + 1] : null, proxyBearer: bearerIdx >= 0 ? raw[bearerIdx + 1] : null };
 };
 
 export async function runCli(raw = process.argv.slice(2), io = {}) {
   const out = io.out ?? console.log, err = io.err ?? console.error;
+  const cwd = io.cwd ?? process.cwd();
+  const localConfigPath = io.localConfigPath ?? join(cwd, '.apicat');
   const userConfigPath = io.userConfigPath ?? defaultUserConfigPath;
+  const localYamlConfigPath = io.localYamlConfigPath ?? join(cwd, 'apicat.yaml');
   const bundledConfigPath = io.bundledConfigPath ?? defaultBundledConfigPath;
-  const hasUser = () => fs.existsSync(userConfigPath);
-  const cfg = (p) => p ?? (hasUser() ? userConfigPath : (fs.existsSync(bundledConfigPath) ? bundledConfigPath : null));
-  const { error, args, arg, pattern, time, debug, response, help, configPath, port, proxyBackend } = parseArgs(raw);
+
+  const hasLocal = () => isReadableFile(localConfigPath);
+  const hasUser = () => isReadableFile(userConfigPath);
+  const hasBundled = () => isReadableFile(bundledConfigPath);
+  const hasLocalYaml = () => isReadableFile(localYamlConfigPath);
+
+  const resolveBase = () => (hasLocal() ? localConfigPath : hasUser() ? userConfigPath : hasBundled() ? bundledConfigPath : null);
+
+  const { error, args, arg, pattern, time, debug, response, help, configPath, port, proxyBackend, proxyBearer } = parseArgs(raw);
   const re = (s) => new RegExp(s.replace(/\*/g, '.*'), 'i');
-  const printConfig = () => { const p = cfg(configPath); if (p) err(configPath ? 'config:' : hasUser() ? 'user:   ' : 'bundled:', p); };
-  const search = (rx) => { const p = cfg(configPath); if (p && fs.existsSync(p)) for (const l of fs.readFileSync(p, 'utf8').split('\n')) if (rx.test(l)) out(l); };
+
+  const printConfig = () => {
+    if (configPath) {
+      err('config:', configPath);
+      return;
+    }
+    const base = resolveBase();
+    if (base) {
+      err(hasLocal() ? 'local:  ' : hasUser() ? 'user:   ' : 'bundled:', base);
+    }
+    if (hasLocalYaml() && localYamlConfigPath !== base) {
+      err('added:  ', localYamlConfigPath);
+    }
+  };
+
+  const search = (rx) => {
+    const filesToSearch = [];
+    if (configPath) {
+      if (isReadableFile(configPath)) filesToSearch.push(configPath);
+    } else {
+      const base = resolveBase();
+      if (base) filesToSearch.push(base);
+      if (hasLocalYaml() && localYamlConfigPath !== base) filesToSearch.push(localYamlConfigPath);
+    }
+    for (const p of filesToSearch) {
+      for (const l of fs.readFileSync(p, 'utf8').split('\n')) {
+        if (rx.test(l)) out(l);
+      }
+    }
+  };
+
   const update = async () => {
-    if (hasUser()) {
+    const targetPath = (hasLocal() && !io.userConfigPath) ? localConfigPath : userConfigPath;
+    if (fs.existsSync(targetPath)) {
       if (!process.stdin.isTTY || !process.stdout.isTTY) {
-        throw new Error(`Refusing to overwrite ${userConfigPath} without confirmation. Run \`apic update\` in an interactive terminal.`);
+        throw new Error(`Refusing to overwrite ${targetPath} without confirmation. Run \`apic update\` in an interactive terminal.`);
       }
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
-        const answer = (await rl.question(`This will overwrite ${userConfigPath}. Are you sure? [y/N] `)).trim().toLowerCase();
+        const answer = (await rl.question(`This will overwrite ${targetPath}. Are you sure? [y/N] `)).trim().toLowerCase();
         if (answer !== 'y' && answer !== 'yes') {
           out('Update cancelled.');
           return false;
@@ -94,8 +136,8 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
     if (!r.ok) throw new Error(`Failed to download ${publishedConfigUrl}: ${r.status} ${r.statusText}`);
     const text = await r.text();
     parseYaml(text);
-    fs.writeFileSync(userConfigPath, text, 'utf8');
-    out(userConfigPath);
+    fs.writeFileSync(targetPath, text, 'utf8');
+    out(targetPath);
     return true;
   };
 
@@ -106,19 +148,19 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
         err(`Error: cannot reach proxy backend ${proxyBackend}`);
         return 1;
       }
-      startProxy({ port: Number(port) || 8080, backend: proxyBackend, out });
+      startProxy({ port: Number(port) || 8080, backend: proxyBackend, bearer: proxyBearer, out });
       return 0;
     } catch (e) {
       err(e.message);
       return 1;
     }
   }
-  await ensureUserConfig({ arg, configPath, userConfigPath, bundledConfigPath });
+  await ensureUserConfig({ arg, configPath, localConfigPath, userConfigPath, bundledConfigPath });
   if (!args.length) printConfig();
   if (!arg) return out(usage), 0;
   if (arg === 'ls' || arg === 'list') {
     out('');
-    for (const a of getApis(cfg(configPath)).sort((a, b) => (a.id ?? `${a.service}.${a.name}`).localeCompare(b.id ?? `${b.service}.${b.name}`))) {
+    for (const a of getApis(configPath, io).sort((a, b) => (a.id ?? `${a.service}.${a.name}`).localeCompare(b.id ?? `${b.service}.${b.name}`))) {
       const id = a.id ?? `${a.service}.${a.name}`;
       if (re(pattern).test(id)) {
         const params = apiParams(a);
@@ -134,15 +176,15 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
   }
   if (!/^\w+\.\w+$/.test(arg)) return search(re(arg)), 0;
 
-  const p = cfg(configPath), [service, name] = arg.split('.'), params = Object.fromEntries(args.slice(1).map(a => [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)]).filter(([k]) => k));
-  const { base, steps } = getFlow(service, name, p), api = base ?? getApi(service, name, p);
+  const [service, name] = arg.split('.'), params = Object.fromEntries(args.slice(1).map(a => [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)]).filter(([k]) => k));
+  const { base, steps } = getFlow(service, name, configPath, io), api = base ?? getApi(service, name, configPath, io);
   if (!api && !steps.length) return err('Unknown API:', arg), 1;
   if (help) return out(base?.help ?? api?.help ?? steps[0]?.help ?? 'No help available.'), 0;
   const isWs = steps.length || String(api?.url ?? '').startsWith('ws');
   const hasBody = api?.body != null && String(api.body).trim() !== '';
   const hasUpload = api?.file != null || api?.multipart != null;
   const jsonPost = api?.method === 'POST' && (typeof api.headers === 'string' ? /json|^bearer /i.test(api.headers) : Object.entries(api?.headers || {}).some(([k, v]) => k.toLowerCase() === 'content-type' && String(v).toLowerCase().includes('json')));
-  const opts = isWs || hasBody || hasUpload ? { vars: params, configPath: p } : jsonPost ? { body: JSON.stringify(params), configPath: p } : { vars: params, configPath: p };
+  const opts = isWs || hasBody || hasUpload ? { vars: params, configPath, ...io } : jsonPost ? { body: JSON.stringify(params), configPath, ...io } : { vars: params, configPath, ...io };
   if (debug) opts.debug = true;
   try {
     const t0 = time ? process.hrtime.bigint() : null;
@@ -163,7 +205,7 @@ export async function runCli(raw = process.argv.slice(2), io = {}) {
     } else {
       const res = await fetchApi(service, name, opts);
       if (t0) elapsed = (Number(process.hrtime.bigint() - t0) / 1e6).toFixed(0);
-      const { output } = getRequest(service, name, params, p);
+      const { output } = getRequest(service, name, params, configPath, io);
       if (output && res.ok) {
         fs.writeFileSync(output, Buffer.from(await res.arrayBuffer()));
         out(output);

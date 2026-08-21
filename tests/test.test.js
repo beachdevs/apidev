@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -156,3 +156,153 @@ test('list output is alphabetically ordered by API ID', async () => {
   assert.strictEqual(code, 0);
   assert.deepStrictEqual(ids, [...ids].sort((a, b) => a.localeCompare(b)));
 });
+
+test('.apicat in current directory overrides ~/.apicat', async (t) => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'apicat-override-'));
+  const userConfig = join(tempDir, 'user.apicat');
+  const localConfig = join(tempDir, '.apicat');
+
+  writeFileSync(userConfig, 'userapi.get:\n  url: https://user.example/api\n  method: GET\n');
+  writeFileSync(localConfig, 'localapi.get:\n  url: https://local.example/api\n  method: GET\n  help: Local API help text\n');
+
+  t.after(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const apis = getApis(null, { cwd: tempDir, userConfigPath: userConfig });
+  assert.strictEqual(apis.some(a => a.id === 'localapi.get'), true);
+  assert.strictEqual(apis.some(a => a.id === 'userapi.get'), false);
+
+  const req = getRequest('localapi', 'get', {}, null, { cwd: tempDir, userConfigPath: userConfig });
+  assert.strictEqual(req.url, 'https://local.example/api');
+  assert.throws(() => getRequest('userapi', 'get', {}, null, { cwd: tempDir, userConfigPath: userConfig }), /Unknown API/);
+
+  const output = [];
+  const code = await runCli(['ls'], {
+    cwd: tempDir,
+    userConfigPath: userConfig,
+    out: value => output.push(value)
+  });
+
+  assert.strictEqual(code, 0);
+  assert.match(output.join('\n'), /localapi\.get/);
+  assert.doesNotMatch(output.join('\n'), /userapi\.get/);
+
+  const helpOut = [];
+  const helpCode = await runCli(['localapi.get', '--help'], {
+    cwd: tempDir,
+    userConfigPath: userConfig,
+    out: value => helpOut.push(value)
+  });
+  assert.strictEqual(helpCode, 0);
+  assert.deepStrictEqual(helpOut, ['Local API help text']);
+});
+
+test('apicat.yaml in current directory adds definitions to ~/.apicat', async (t) => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'apicat-yaml-'));
+  const userConfig = join(tempDir, 'user.apicat');
+  const localYaml = join(tempDir, 'apicat.yaml');
+
+  writeFileSync(userConfig, 'baseapi.get:\n  url: https://base.example/api\n  method: GET\nshared.api:\n  url: https://base.example/shared\n  method: GET\n');
+  writeFileSync(localYaml, 'extraapi.get:\n  url: https://extra.example/api\n  method: GET\n  help: Extra API help text\nshared.api:\n  url: https://overridden.example/shared\n  method: POST\n');
+
+  t.after(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const apis = getApis(null, { cwd: tempDir, userConfigPath: userConfig });
+  const ids = apis.map(a => a.id).sort();
+  assert.deepStrictEqual(ids, ['baseapi.get', 'extraapi.get', 'shared.api']);
+
+  const sharedApi = apis.find(a => a.id === 'shared.api');
+  assert.strictEqual(sharedApi.url, 'https://overridden.example/shared');
+  assert.strictEqual(sharedApi.method, 'POST');
+
+  const baseReq = getRequest('baseapi', 'get', {}, null, { cwd: tempDir, userConfigPath: userConfig });
+  assert.strictEqual(baseReq.url, 'https://base.example/api');
+  const extraReq = getRequest('extraapi', 'get', {}, null, { cwd: tempDir, userConfigPath: userConfig });
+  assert.strictEqual(extraReq.url, 'https://extra.example/api');
+  const sharedReq = getRequest('shared', 'api', {}, null, { cwd: tempDir, userConfigPath: userConfig });
+  assert.strictEqual(sharedReq.url, 'https://overridden.example/shared');
+  assert.strictEqual(sharedReq.method, 'POST');
+
+  const output = [];
+  const code = await runCli(['ls'], {
+    cwd: tempDir,
+    userConfigPath: userConfig,
+    out: value => output.push(value)
+  });
+
+  assert.strictEqual(code, 0);
+  assert.match(output.join('\n'), /baseapi\.get/);
+  assert.match(output.join('\n'), /extraapi\.get/);
+  assert.match(output.join('\n'), /shared\.api/);
+
+  const helpOut = [];
+  const helpCode = await runCli(['extraapi.get', '--help'], {
+    cwd: tempDir,
+    userConfigPath: userConfig,
+    out: value => helpOut.push(value)
+  });
+  assert.strictEqual(helpCode, 0);
+  assert.deepStrictEqual(helpOut, ['Extra API help text']);
+});
+
+test('both .apicat and apicat.yaml in current directory: .apicat overrides ~/.apicat and apicat.yaml is added', async (t) => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'apicat-both-'));
+  const userConfig = join(tempDir, 'user.apicat');
+  const localConfig = join(tempDir, '.apicat');
+  const localYaml = join(tempDir, 'apicat.yaml');
+
+  writeFileSync(userConfig, 'userapi.get:\n  url: https://user.example/api\n');
+  writeFileSync(localConfig, 'localbase.get:\n  url: https://localbase.example/api\n');
+  writeFileSync(localYaml, 'localextra.get:\n  url: https://localextra.example/api\n');
+
+  t.after(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const apis = getApis(null, { cwd: tempDir, userConfigPath: userConfig });
+  const ids = apis.map(a => a.id).sort();
+  assert.deepStrictEqual(ids, ['localbase.get', 'localextra.get']);
+  assert.strictEqual(apis.some(a => a.id === 'userapi.get'), false);
+
+  const executable = spawnSync(process.execPath, [join(root, 'src/apicli'), 'ls'], {
+    encoding: 'utf8',
+    cwd: tempDir
+  });
+
+  assert.strictEqual(executable.status, 0);
+  assert.match(executable.stdout, /localbase\.get/);
+  assert.match(executable.stdout, /localextra\.get/);
+});
+
+test('explicit --config ignores .apicat and apicat.yaml in current directory', async (t) => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'apicat-explicit-'));
+  const customConfig = join(tempDir, 'custom.yaml');
+  const localConfig = join(tempDir, '.apicat');
+  const localYaml = join(tempDir, 'apicat.yaml');
+
+  writeFileSync(customConfig, 'custom.api:\n  url: https://custom.example/api\n');
+  writeFileSync(localConfig, 'localbase.get:\n  url: https://localbase.example/api\n');
+  writeFileSync(localYaml, 'localextra.get:\n  url: https://localextra.example/api\n');
+
+  t.after(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const apis = getApis(customConfig, { cwd: tempDir });
+  assert.deepStrictEqual(apis.map(a => a.id), ['custom.api']);
+
+  const output = [];
+  const code = await runCli(['--config', customConfig, 'ls'], {
+    cwd: tempDir,
+    out: value => output.push(value)
+  });
+
+  assert.strictEqual(code, 0);
+  assert.match(output.join('\n'), /custom\.api/);
+  assert.doesNotMatch(output.join('\n'), /localbase\.get/);
+  assert.doesNotMatch(output.join('\n'), /localextra\.get/);
+});
+

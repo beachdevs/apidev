@@ -62,7 +62,7 @@ const capture = (stream, limit = MAX_LOG) => {
   };
 };
 
-export function startProxy({ port = 8080, backend, out = console.log } = {}) {
+export function startProxy({ port = 8080, backend, bearer, out = console.log } = {}) {
   const base = resolveBackend(backend);
   const server = http.createServer((req, res) => {
     const requested = req.url.startsWith('http')
@@ -71,6 +71,7 @@ export function startProxy({ port = 8080, backend, out = console.log } = {}) {
     const target = base ? new URL(`${requested.pathname}${requested.search}`, base) : requested;
     const headers = { ...req.headers, host: target.host };
     for (const h of hopByHop) delete headers[h];
+    if (bearer) headers.Authorization = `Bearer ${process.env[bearer] ?? ''}`;
     const transport = target.protocol === 'https:' ? https : http;
     const reqLog = capture(req);
 

@@ -37,6 +37,29 @@ test('proxy forwards method, headers, and body and returns backend status', asyn
   }
 });
 
+test('proxy adds a Bearer Authorization header from the configured env var', async () => {
+  const backend = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ auth: req.headers.authorization }));
+  });
+  await new Promise((r) => backend.listen(0, '127.0.0.1', r));
+  const backendPort = backend.address().port;
+
+  const proxy = startProxy({ port: 0, backend: `127.0.0.1:${backendPort}`, bearer: 'API_KEY', out: () => {} });
+  await new Promise((r) => proxy.once('listening', r));
+
+  try {
+    process.env.API_KEY = 'sekret';
+    const res = await fetch(`http://127.0.0.1:${proxy.address().port}/`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual((await res.json()).auth, 'Bearer sekret');
+  } finally {
+    delete process.env.API_KEY;
+    proxy.close();
+    await new Promise((r) => backend.close(r));
+  }
+});
+
 test('proxy returns 502 when the backend is unreachable', async () => {
   const proxy = startProxy({ port: 0, backend: '127.0.0.1:1', out: () => {} });
   await new Promise((r) => proxy.once('listening', r));
