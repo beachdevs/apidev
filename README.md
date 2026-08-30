@@ -37,11 +37,33 @@ Options
   apic --config <path> httpbin.get    Use custom config file instead of ~/.apicat
 ```
 
-## 🤖 apicat for your LLM
+## 🤖 Model Context Protocol (MCP) Server for AI Agents
 
-No installation required.
+`apicat` includes a ultra-fast, native Rust MCP server (`mcp/`) that lets AI coding assistants (Antigravity, Cursor, Claude Desktop, Claude Code, Windsurf, Cline) call and execute API definitions with zero token-reading overhead and sub-5ms cold starts.
 
-If you want an AI to learn your API definitions, tell it:
+### 1. Compile the MCP Binary
+```bash
+cargo build --release --manifest-path mcp/Cargo.toml
+```
+The compiled binary will be at `mcp/target/release/apicat-mcp`.
+
+### 2. Configure Your AI Agent
+Add `apicat` to your agent's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "apicat": {
+      "command": "/absolute/path/to/apicat/mcp/target/release/apicat-mcp"
+    }
+  }
+}
+```
+
+---
+
+## 🤖 Prompting LLMs directly
+If you want an AI to learn your raw API definitions without MCP:
 
 `Learn api definitions from https://unpkg.com/apicat`
 

@@ -16,6 +16,10 @@ apicat/
 ├── apic                  # CLI executable bin (points to ./src/apicli)
 ├── apicat                # CLI executable bin (points to ./src/apicli)
 ├── apicat.yaml           # Bundled default API definitions catalog
+├── mcp/                  # Native Rust Model Context Protocol (MCP) server
+│   ├── Cargo.toml        # Cargo manifest for apicat-mcp
+│   ├── README.md         # MCP build & agent configuration guide
+│   └── src/main.rs       # Stdio JSON-RPC MCP server with schema inference
 ├── package.json          # Node module manifest (ESM, "type": "module", engines: node >= 22)
 ├── src/
 │   ├── apicli            # Executable script that invokes runCli()
